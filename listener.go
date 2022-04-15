@@ -53,6 +53,10 @@ func (l *Listener) Events() error {
 			u := c.Challenger
 			tc := c.TimeControl
 
+			if u.ID == botID {
+				return
+			}
+
 			if c.Status != "created" {
 				// TODO: what other statuses do we process?
 				return
