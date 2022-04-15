@@ -4,11 +4,21 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
 	"sync"
+	"time"
 	"trollfish-lichess/api"
 )
 
+const botID = "trollololfish"
+const startPosFEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
+
 type Listener struct {
+	activeGameID     string
+	gamePlayerNumber int
+	gameGaveTime     bool
+	gameOpponent     api.Player
+
 	playingMtx sync.Mutex
 	playing    map[string]any
 	input      chan<- string
@@ -43,22 +53,13 @@ func (l *Listener) Events() error {
 			u := c.Challenger
 			tc := c.TimeControl
 
-			/*
-				lichess.Challenge{ID:"Yqi9Ldao", URL:"https://lichess.org/Yqi9Ldao", Status:"created", Challenger:lichess.ChallengeUser{ID:"bantercode", Name:"bantercode", Title:"", Rating:1112, Provisional:false, Online:true, Patron:false, Lag:0}, DestUser:(*lichess.ChallengeUser)(0xc0001fe690), Rated:false, Speed:"blitz", TimeControl:lichess.ChallengeTimeControl{Type:"clock", Limit:180, Increment:2, Show:"3+2"}, Color:"random", Perf:lichess.ChallengePerf{Icon:"\ue01d", Name:"Blitz"}, Direction:"", InitialFEN:"", DeclineReason:""}
-				id: Yqi9Ldao url: https://lichess.org/Yqi9Ldao direction:  rated: false status: created color: random start_fen: ''
-				- user_id: bantercode rating: 1112 online: true name: bantercode lag: 0 title:
-				- type: clock limit: 180 inc: 2 show: 3+2
-			*/
-
-			fmt.Printf("%#v\n", c) // TODO: debug; remove
-
 			if c.Status != "created" {
 				// TODO: what other statuses do we process?
 				return
 			}
 
 			// only use standard initial position
-			if c.InitialFEN != "" {
+			if c.InitialFEN != "" && c.InitialFEN != "startpos" {
 				if err := api.DeclineChallenge(c.ID, "standard"); err != nil {
 					log.Printf("ERR: %s\n", err)
 				}
@@ -66,12 +67,20 @@ func (l *Listener) Events() error {
 			}
 
 			// nahh bro
-			if u.Provisional && u.Name != "bantercode" {
+			if u.Provisional {
 				if err := api.DeclineChallenge(c.ID, "later"); err != nil {
 					log.Printf("ERR: %s\n", err)
 				}
 				return
 			}
+
+			/*lowerName := strings.ToLower(u.Name)
+			if !strings.Contains(lowerName, "mayhem") && !strings.Contains(lowerName, "bantercode") {
+				if err := api.DeclineChallenge(c.ID, "later"); err != nil {
+					log.Printf("ERR: %s\n", err)
+				}
+				return
+			}*/
 
 			if c.Variant.Key != "standard" {
 				if err := api.DeclineChallenge(c.ID, "standard"); err != nil {
@@ -80,53 +89,28 @@ func (l *Listener) Events() error {
 				return
 			}
 
-			if u.Name != "bantercode" {
-
-				// bots can't play ultrabullet (but they can play 0+1)
-				// I don't want to play (or test) games more than 5 mins or with increment > 5s
-				if tc.Type != "clock" {
-					if err := api.DeclineChallenge(c.ID, "timeControl"); err != nil {
-						log.Printf("ERR: %s\n", err)
-					}
-					return
+			// bots can't play ultrabullet (but they can play 0+1)
+			// I don't want to play (or test) games more than 5 mins or with increment > 5s
+			if tc.Type != "clock" {
+				if err := api.DeclineChallenge(c.ID, "timeControl"); err != nil {
+					log.Printf("ERR: %s\n", err)
 				}
-				if tc.Limit < 30 {
-					if err := api.DeclineChallenge(c.ID, "tooFast"); err != nil {
-						log.Printf("ERR: %s\n", err)
-					}
-					return
-				}
-				if tc.Limit > 300 || tc.Increment > 5 {
-					if err := api.DeclineChallenge(c.ID, "tooSlow"); err != nil {
-						log.Printf("ERR: %s\n", err)
-					}
-					return
-				}
+				return
 			}
-
-			fmt.Printf("id: %s url: %s direction: %s rated: %v status: %s color: %s start_fen: '%s' variant: %s\n",
-				c.ID,
-				c.URL,
-				c.Direction,
-				c.Rated,
-				c.Status,
-				c.Color,
-				c.InitialFEN,
-				c.Variant.Key,
-			)
-
-			fmt.Printf("- user_id: %s rating: %d online: %v name: %s lag: %d title: %s\n",
-				u.ID,
-				u.Rating,
-				u.Online,
-				u.Name,
-				u.Lag,
-				u.Title,
-			)
-
-			fmt.Printf("- type: %s limit: %d inc: %d show: %s\n", tc.Type, tc.Limit, tc.Increment, tc.Show)
-
-			if u.Name != "bantercode" {
+			//if tc.Limit < 30 {
+			if tc.Limit < 120 && u.Name != "bantercode" {
+				if err := api.DeclineChallenge(c.ID, "tooFast"); err != nil {
+					log.Printf("ERR: %s\n", err)
+				}
+				return
+			}
+			if tc.Limit > 300 || tc.Increment > 5 {
+				if err := api.DeclineChallenge(c.ID, "tooSlow"); err != nil {
+					log.Printf("ERR: %s\n", err)
+				}
+				return
+			}
+			if l.activeGameID != "" {
 				if err := api.DeclineChallenge(c.ID, "later"); err != nil {
 					log.Printf("ERR: %s\n", err)
 				}
@@ -181,13 +165,172 @@ func (l *Listener) StreamGame(gameID string) {
 	endpoint := fmt.Sprintf("https://lichess.org/api/bot/game/stream/%s", gameID)
 
 	handler := func(ndjson []byte) {
-		var gameFull api.GameFull
-		if err := json.Unmarshal(ndjson, &gameFull); err != nil {
+		var event api.Event
+		if err := json.Unmarshal(ndjson, &event); err != nil {
 			log.Fatal(err)
 		}
-		fmt.Printf("gameFull ndjson:\n%s\n\ngameFull:\n%#v\n", ndjson, gameFull)
+
+		var state api.State
+
+		if event.Type == "gameFull" {
+			// full game
+			var game api.GameFull
+			if err := json.Unmarshal(ndjson, &game); err != nil {
+				log.Fatal(err)
+			}
+			//fmt.Printf("game ndjson:\n%s\n\ngame:\n%#v\n", ndjson, game)
+
+			state = game.State
+
+			if game.State.Status != "started" {
+				return
+			}
+
+			var opp api.Player
+			var playerNumber int
+			if game.White.ID == botID {
+				playerNumber = 0
+				opp = game.Black
+			} else if game.Black.ID == botID {
+				playerNumber = 1
+				opp = game.White
+			} else {
+				fmt.Printf("not your game %s vs %s\n", game.White.ID, game.Black.ID)
+				return
+			}
+
+			play := true
+			l.playingMtx.Lock()
+			if l.activeGameID == "" {
+				var rated string
+				if game.Rated {
+					rated = "Rated"
+				} else {
+					rated = "Unrated"
+				}
+				initialTime := time.Duration(game.Clock.Initial) * time.Millisecond
+				increment := time.Duration(game.Clock.Increment) * time.Millisecond
+				timeControl := fmt.Sprintf("%v+%v", initialTime, increment)
+
+				fmt.Printf("%s *** New game! %s (%d) vs. %s (%d) %s %s\n",
+					ts(),
+					game.White.Name, game.White.Rating,
+					game.Black.Name, game.Black.Rating,
+					rated,
+					timeControl,
+				)
+				l.activeGameID = gameID
+				l.gamePlayerNumber = playerNumber
+				l.gameGaveTime = false
+				l.gameOpponent = opp
+				l.input <- "ucinewgame"
+			} else if l.activeGameID != gameID {
+				play = false
+			}
+			l.playingMtx.Unlock()
+
+			if !play {
+				return
+			}
+		} else if event.Type == "gameState" {
+			if err := json.Unmarshal(ndjson, &state); err != nil {
+				log.Fatal(err)
+			}
+		} else {
+			fmt.Printf("%s *** unhandled event type: '%s'\n", ts(), event.Type)
+			return
+		}
+
+		if state.Status != "started" {
+			l.playingMtx.Lock()
+			l.gamePlayerNumber = -1
+			l.activeGameID = ""
+			l.gameGaveTime = false
+			l.gameOpponent = api.Player{}
+			l.playingMtx.Unlock()
+			return
+		}
+
+		moves := strings.Split(state.Moves, " ")
+		if len(moves) == 1 && len(moves[0]) == 0 {
+			moves = nil
+		}
+		if len(moves)%2 != l.gamePlayerNumber {
+			fmt.Printf("%s waiting for opponent...\n", ts())
+			return
+		}
+
+		var opponentTime, ourTime time.Duration
+		if l.gamePlayerNumber == 0 {
+			ourTime = time.Duration(state.WhiteTime) * time.Millisecond
+			opponentTime = time.Duration(state.BlackTime) * time.Millisecond
+		} else {
+			ourTime = time.Duration(state.BlackTime) * time.Millisecond
+			opponentTime = time.Duration(state.WhiteTime) * time.Millisecond
+		}
+
+		pos := fmt.Sprintf("position fen %s moves %s", startPosFEN, state.Moves)
+		goCmd := fmt.Sprintf("go wtime %d btime %d winc %d binc %d",
+			state.WhiteTime, state.BlackTime,
+			state.WhiteInc, state.BlackInc,
+		)
+
+		//fmt.Printf("%s\n%s\n", pos, goCmd)
+
+		l.input <- pos
+		l.input <- goCmd
+
+		fmt.Printf("%s thinking...\n", ts())
+
+		var bestmove string
+		for item := range l.output {
+			if strings.HasPrefix(item, "bestmove ") {
+				p := strings.Split(item, " ")
+				bestmove = p[1]
+				l.input <- "stop"
+				break
+			}
+		}
+
+		fmt.Printf("move=%s gameID=%s\n", bestmove, gameID)
+
+		if bestmove != "" {
+			if err := api.PlayMove(gameID, bestmove); err != nil {
+				// '{"error":"Not your turn, or game already over"}'
+				// TODO: we should handle the opponent resigning, flagging or aborting while we're thinking
+				fmt.Printf("*** ERR: api.PlayMove: %v\n", err)
+
+				// read the incantation for 'end game'
+				l.playingMtx.Lock()
+				l.gamePlayerNumber = -1
+				l.activeGameID = ""
+				l.gameGaveTime = false
+				l.gameOpponent = api.Player{}
+				l.playingMtx.Unlock()
+				return
+			}
+
+			if l.gameGaveTime {
+				fmt.Printf("our_time: %v opp_time: %v gave_time: %v\n", ourTime, opponentTime, l.gameGaveTime)
+			} else {
+				fmt.Printf("our_time: %v opp_time: %v\n", ourTime, opponentTime)
+			}
+
+			if opponentTime < 15*time.Second && ourTime > opponentTime && !l.gameGaveTime && l.gameOpponent.Title != "BOT" {
+				l.gameGaveTime = true
+				fmt.Printf("*** attempting to give time!\n")
+				for i := 0; i < 6; i++ {
+					go func() {
+						if err := api.AddTime(gameID, 15); err != nil {
+							log.Printf("AddTime: %v\n", err)
+						}
+					}()
+				}
+			}
+		}
 	}
 
+	fmt.Printf("start game stream %s\n", gameID)
 	if err := api.ReadStream(endpoint, handler); err != nil {
 		log.Printf("ERR: StreamGame: %v\n", err)
 	}

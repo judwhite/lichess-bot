@@ -149,7 +149,7 @@ func StreamBots() error {
 		created := time.UnixMilli(user.CreatedAt)
 		seen := time.UnixMilli(user.SeenAt)
 		fmt.Printf("%s blitz: games: %d rating: %d created: %v seen: %v ago\n", user.ID, blitz.Games, blitz.Rating,
-			created.Format(time.RubyDate), time.Since(seen).Round(time.Second))
+			created.Format("Jan 2006"), time.Since(seen).Round(time.Second))
 	}
 
 	if err := ReadStream("https://lichess.org/api/bot/online", handler); err != nil {
@@ -203,7 +203,35 @@ func AuthToken() string {
 }
 
 func AcceptChallenge(id string) error {
+	fmt.Printf("* ACCEPT challenge %s\n", id)
+
 	endpoint := fmt.Sprintf("https://lichess.org/api/challenge/%s/accept", id)
+
+	req, err := http.NewRequest("POST", endpoint, nil)
+	if err != nil {
+		return fmt.Errorf("http.NewRequest: '%s' %v", endpoint, err)
+	}
+
+	req.Header.Add("Authorization", AuthToken())
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("http.DefaultClient.Do: '%s' %v", endpoint, err)
+	}
+
+	defer resp.Body.Close()
+
+	b, _ := ioutil.ReadAll(resp.Body)
+
+	if resp.StatusCode != 200 {
+		return fmt.Errorf("http status code %d '%s' body: '%s'", resp.StatusCode, endpoint, b)
+	}
+
+	return nil
+}
+
+func AddTime(gameID string, seconds int) error {
+	endpoint := fmt.Sprintf("https://lichess.org/api/round/%s/add-time/%d", gameID, seconds)
 
 	req, err := http.NewRequest("POST", endpoint, nil)
 	if err != nil {
