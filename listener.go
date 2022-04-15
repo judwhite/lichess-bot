@@ -70,13 +70,29 @@ func (l *Listener) Events() error {
 				return
 			}
 
+			// bots wanting unrated can #SiO2
+			if u.Title == "BOT" {
+				if !c.Rated {
+					if err := api.DeclineChallenge(c.ID, "rated"); err != nil {
+						log.Printf("ERR: %s\n", err)
+					}
+					return
+				}
+				if tc.Increment == 0 {
+					if err := api.DeclineChallenge(c.ID, "timeControl"); err != nil {
+						log.Printf("ERR: %s\n", err)
+					}
+					return
+				}
+			}
+
 			// nahh bro
-			if u.Provisional {
+			/*if u.Provisional {
 				if err := api.DeclineChallenge(c.ID, "later"); err != nil {
 					log.Printf("ERR: %s\n", err)
 				}
 				return
-			}
+			}*/
 
 			/*lowerName := strings.ToLower(u.Name)
 			if !strings.Contains(lowerName, "mayhem") && !strings.Contains(lowerName, "bantercode") {
@@ -181,7 +197,6 @@ func (l *Listener) StreamGame(gameID string) {
 			if err := json.Unmarshal(ndjson, &game); err != nil {
 				log.Fatal(err)
 			}
-			//fmt.Printf("game ndjson:\n%s\n\ngame:\n%#v\n", ndjson, game)
 
 			state = game.State
 
