@@ -121,22 +121,22 @@ func (l *Listener) Events() error {
 				log.Printf("ERR: AcceptChallenge: %v\n", err)
 			}
 		} else if event.Type == "gameStart" {
-			fmt.Printf("gameStart: %s\n", ndjson)
+			fmt.Printf("%s gameStart: %s\n", ts(), ndjson)
 			var gameEvent api.GameEvent
 			if err := json.Unmarshal(ndjson, &gameEvent); err != nil {
 				log.Fatalf("%v json: '%s' len=%d", err, ndjson, len(ndjson))
 			}
 			game := gameEvent.Game
-			fmt.Printf("%#v\n", game)
+			fmt.Printf("%s %#v\n", ts(), game)
 			go l.StreamGame(game.GameID)
 		} else if event.Type == "gameFinish" {
-			fmt.Printf("gameFinish: %s\n", ndjson)
+			fmt.Printf("%s gameFinish: %s\n", ts(), ndjson)
 			var gameEvent api.GameEvent
 			if err := json.Unmarshal(ndjson, &gameEvent); err != nil {
 				log.Fatalf("%v json: '%s' len=%d", err, ndjson, len(ndjson))
 			}
 		} else {
-			fmt.Printf("event: %s\n", ndjson)
+			fmt.Printf("%s *** UNHANDLED EVENT: %s\n", ts(), ndjson)
 		}
 	}
 
@@ -270,9 +270,9 @@ func (l *Listener) StreamGame(gameID string) {
 		}
 
 		pos := fmt.Sprintf("position fen %s moves %s", startPosFEN, state.Moves)
-		goCmd := fmt.Sprintf("go wtime %d btime %d winc %d binc %d",
-			state.WhiteTime, state.BlackTime,
-			state.WhiteInc, state.BlackInc,
+		goCmd := fmt.Sprintf("go wtime %d winc %d btime %d binc %d",
+			state.WhiteTime, state.WhiteInc,
+			state.BlackTime, state.BlackInc,
 		)
 
 		//fmt.Printf("%s\n%s\n", pos, goCmd)
@@ -292,7 +292,7 @@ func (l *Listener) StreamGame(gameID string) {
 			}
 		}
 
-		fmt.Printf("move=%s gameID=%s\n", bestmove, gameID)
+		fmt.Printf("%s move=%s gameID=%s\n", ts(), bestmove, gameID)
 
 		if bestmove != "" {
 			if err := api.PlayMove(gameID, bestmove); err != nil {
@@ -311,14 +311,14 @@ func (l *Listener) StreamGame(gameID string) {
 			}
 
 			if l.gameGaveTime {
-				fmt.Printf("our_time: %v opp_time: %v gave_time: %v\n", ourTime, opponentTime, l.gameGaveTime)
+				fmt.Printf("%s our_time: %v opp_time: %v gave_time: %v\n", ts(), ourTime, opponentTime, l.gameGaveTime)
 			} else {
-				fmt.Printf("our_time: %v opp_time: %v\n", ourTime, opponentTime)
+				fmt.Printf("%s our_time: %v opp_time: %v\n", ts(), ourTime, opponentTime)
 			}
 
 			if opponentTime < 15*time.Second && ourTime > opponentTime && !l.gameGaveTime && l.gameOpponent.Title != "BOT" {
 				l.gameGaveTime = true
-				fmt.Printf("*** attempting to give time!\n")
+				fmt.Printf("%s *** attempting to give time!\n", ts())
 				for i := 0; i < 6; i++ {
 					go func() {
 						if err := api.AddTime(gameID, 15); err != nil {
@@ -330,7 +330,7 @@ func (l *Listener) StreamGame(gameID string) {
 		}
 	}
 
-	fmt.Printf("start game stream %s\n", gameID)
+	fmt.Printf("%s start game stream %s\n", ts(), gameID)
 	if err := api.ReadStream(endpoint, handler); err != nil {
 		log.Printf("ERR: StreamGame: %v\n", err)
 	}
