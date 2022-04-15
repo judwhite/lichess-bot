@@ -101,8 +101,7 @@ func (l *Listener) Events() error {
 				}
 				return
 			}
-			//if tc.Limit < 30 {
-			if tc.Limit < 120 && u.Name != "bantercode" {
+			if tc.Limit < 90 {
 				if err := api.DeclineChallenge(c.ID, "tooFast"); err != nil {
 					log.Printf("ERR: %s\n", err)
 				}
