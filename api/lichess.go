@@ -132,6 +132,10 @@ func ReadStream(endpoint string, handler func([]byte)) error {
 	return nil
 }
 
+type ChallengeQueue struct {
+	bots map[string]BotInfo
+}
+
 func StreamBots() error {
 	handler := func(ndjson []byte) {
 		var user User
@@ -139,16 +143,19 @@ func StreamBots() error {
 			log.Fatal(err)
 		}
 
-		blitz, ok := user.Perfs["blitz"]
+		bullet, ok := user.Perfs["bullet"]
 		if !ok {
 			return
 		}
-		if blitz.Games == 0 || blitz.Provisional {
+		if bullet.Games == 0 || bullet.Provisional {
+			return
+		}
+		if bullet.Rating < 2000 {
 			return
 		}
 		created := time.UnixMilli(user.CreatedAt)
 		seen := time.UnixMilli(user.SeenAt)
-		fmt.Printf("%s blitz: games: %d rating: %d created: %v seen: %v ago\n", user.ID, blitz.Games, blitz.Rating,
+		fmt.Printf("%s bullet: games: %d rating: %d created: %v seen: %v ago\n", user.ID, bullet.Games, bullet.Rating,
 			created.Format("Jan 2006"), time.Since(seen).Round(time.Second))
 	}
 
@@ -265,6 +272,39 @@ func PlayMove(gameID, move string) error {
 	}
 
 	req.Header.Add("Authorization", AuthToken())
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("http.DefaultClient.Do: '%s' %v", endpoint, err)
+	}
+
+	defer resp.Body.Close()
+
+	b, _ := ioutil.ReadAll(resp.Body)
+
+	if resp.StatusCode != 200 {
+		return fmt.Errorf("http status code %d '%s' body: '%s'", resp.StatusCode, endpoint, b)
+	}
+
+	return nil
+}
+
+func Chat(gameID, room, text string) error {
+	endpoint := fmt.Sprintf("https://lichess.org/api/bot/game/%s/chat", gameID)
+
+	data := url.Values{}
+	data.Add("room", room)
+	data.Add("text", text)
+
+	body := data.Encode()
+	req, err := http.NewRequest("POST", endpoint, strings.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("http.NewRequest: '%s' %v", endpoint, err)
+	}
+
+	req.Header.Add("Authorization", AuthToken())
+	req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Add("Content-Length", fmt.Sprintf("%d", len(body)))
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {

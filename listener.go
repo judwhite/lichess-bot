@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -23,6 +24,8 @@ type Listener struct {
 	playing    map[string]any
 	input      chan<- string
 	output     <-chan string
+
+	challengeQueue api.Challenges
 }
 
 func New(input chan<- string, output <-chan string) *Listener {
@@ -50,94 +53,14 @@ func (l *Listener) Events() error {
 			}
 
 			c := challengeEvent.Challenge
-			u := c.Challenger
-			tc := c.TimeControl
 
-			if u.ID == botID {
-				return
-			}
-
-			if c.Status != "created" {
-				// TODO: what other statuses do we process?
-				return
-			}
-
-			// only use standard initial position
-			if c.InitialFEN != "" && c.InitialFEN != "startpos" {
-				if err := api.DeclineChallenge(c.ID, "standard"); err != nil {
-					log.Printf("ERR: %s\n", err)
+			switch c.Status {
+			case "created":
+				if err := l.QueueChallenge(c); err != nil {
+					log.Printf("ERR: %v\n", err)
 				}
-				return
-			}
-
-			// bots wanting unrated can #SiO2
-			if u.Title == "BOT" {
-				if !c.Rated {
-					if err := api.DeclineChallenge(c.ID, "rated"); err != nil {
-						log.Printf("ERR: %s\n", err)
-					}
-					return
-				}
-				if tc.Increment == 0 {
-					if err := api.DeclineChallenge(c.ID, "timeControl"); err != nil {
-						log.Printf("ERR: %s\n", err)
-					}
-					return
-				}
-			}
-
-			// nahh bro
-			/*if u.Provisional {
-				if err := api.DeclineChallenge(c.ID, "later"); err != nil {
-					log.Printf("ERR: %s\n", err)
-				}
-				return
-			}*/
-
-			/*lowerName := strings.ToLower(u.Name)
-			if !strings.Contains(lowerName, "mayhem") && !strings.Contains(lowerName, "bantercode") {
-				if err := api.DeclineChallenge(c.ID, "later"); err != nil {
-					log.Printf("ERR: %s\n", err)
-				}
-				return
-			}*/
-
-			if c.Variant.Key != "standard" {
-				if err := api.DeclineChallenge(c.ID, "standard"); err != nil {
-					log.Printf("ERR: %s\n", err)
-				}
-				return
-			}
-
-			// bots can't play ultrabullet (but they can play 0+1)
-			// I don't want to play (or test) games more than 5 mins or with increment > 5s
-			if tc.Type != "clock" {
-				if err := api.DeclineChallenge(c.ID, "timeControl"); err != nil {
-					log.Printf("ERR: %s\n", err)
-				}
-				return
-			}
-			if tc.Limit < 90 {
-				if err := api.DeclineChallenge(c.ID, "tooFast"); err != nil {
-					log.Printf("ERR: %s\n", err)
-				}
-				return
-			}
-			if tc.Limit > 300 || tc.Increment > 5 {
-				if err := api.DeclineChallenge(c.ID, "tooSlow"); err != nil {
-					log.Printf("ERR: %s\n", err)
-				}
-				return
-			}
-			if l.activeGameID != "" {
-				if err := api.DeclineChallenge(c.ID, "later"); err != nil {
-					log.Printf("ERR: %s\n", err)
-				}
-				return
-			}
-
-			if err := api.AcceptChallenge(c.ID); err != nil {
-				log.Printf("ERR: AcceptChallenge: %v\n", err)
+			default:
+				log.Printf("TODO: Challenge status '%s' unhandled", c.Status)
 			}
 		} else if event.Type == "gameStart" {
 			fmt.Printf("%s gameStart: %s\n", ts(), ndjson)
@@ -158,6 +81,8 @@ func (l *Listener) Events() error {
 			fmt.Printf("%s *** UNHANDLED EVENT: %s\n", ts(), ndjson)
 		}
 	}
+
+	go l.processChallengeQueue()
 
 	if err := api.ReadStream("https://lichess.org/api/stream/event", handler); err != nil {
 		return err
@@ -183,6 +108,9 @@ func (l *Listener) StreamGame(gameID string) {
 
 	endpoint := fmt.Sprintf("https://lichess.org/api/bot/game/stream/%s", gameID)
 
+	playerNumber := -1
+	rated := true
+
 	handler := func(ndjson []byte) {
 		var event api.Event
 		if err := json.Unmarshal(ndjson, &event); err != nil {
@@ -204,8 +132,9 @@ func (l *Listener) StreamGame(gameID string) {
 				return
 			}
 
+			rated = game.Rated
+
 			var opp api.Player
-			var playerNumber int
 			if game.White.ID == botID {
 				playerNumber = 0
 				opp = game.Black
@@ -237,10 +166,24 @@ func (l *Listener) StreamGame(gameID string) {
 					rated,
 					timeControl,
 				)
+
+				l.resetGame()
 				l.activeGameID = gameID
 				l.gamePlayerNumber = playerNumber
-				l.gameGaveTime = false
 				l.gameOpponent = opp
+
+				if game.Rated {
+					l.input <- "setoption name PlayBad value false"
+				} else {
+					l.input <- "setoption name PlayBad value true"
+				}
+
+				if game.Rated && opp.Title == "BOT" {
+					l.input <- "setoption name StartAgro value true"
+				} else {
+					l.input <- "setoption name StartAgro value false"
+				}
+
 				l.input <- "ucinewgame"
 			} else if l.activeGameID != gameID {
 				play = false
@@ -254,6 +197,25 @@ func (l *Listener) StreamGame(gameID string) {
 			if err := json.Unmarshal(ndjson, &state); err != nil {
 				log.Fatal(err)
 			}
+
+			var color string
+			if playerNumber == 0 {
+				color = "white"
+			} else if playerNumber == 1 {
+				color = "black"
+			}
+
+			if state.Winner != "" {
+				fmt.Printf("gameState: %s\n", ndjson)
+				fmt.Printf("winner: %s rated: %v color: %s\n", state.Winner, rated, color)
+				if !rated && state.Winner != color && state.Winner != "" {
+					const room = "player"
+					const text = "Good game. Want to play rated?"
+					if err := api.Chat(gameID, room, text); err != nil {
+						fmt.Printf("*** ERR: api.PlayMove: %v\n", err)
+					}
+				}
+			}
 		} else {
 			fmt.Printf("%s *** unhandled event type: '%s'\n", ts(), event.Type)
 			return
@@ -261,20 +223,8 @@ func (l *Listener) StreamGame(gameID string) {
 
 		if state.Status != "started" {
 			l.playingMtx.Lock()
-			l.gamePlayerNumber = -1
-			l.activeGameID = ""
-			l.gameGaveTime = false
-			l.gameOpponent = api.Player{}
+			l.resetGame()
 			l.playingMtx.Unlock()
-			return
-		}
-
-		moves := strings.Split(state.Moves, " ")
-		if len(moves) == 1 && len(moves[0]) == 0 {
-			moves = nil
-		}
-		if len(moves)%2 != l.gamePlayerNumber {
-			fmt.Printf("%s waiting for opponent...\n", ts())
 			return
 		}
 
@@ -285,6 +235,15 @@ func (l *Listener) StreamGame(gameID string) {
 		} else {
 			ourTime = time.Duration(state.BlackTime) * time.Millisecond
 			opponentTime = time.Duration(state.WhiteTime) * time.Millisecond
+		}
+
+		moves := strings.Split(state.Moves, " ")
+		if len(moves) == 1 && len(moves[0]) == 0 {
+			moves = nil
+		}
+		if len(moves)%2 != l.gamePlayerNumber {
+			fmt.Printf("%s waiting for opponent...\n", ts())
+			return
 		}
 
 		pos := fmt.Sprintf("position fen %s moves %s", startPosFEN, state.Moves)
@@ -320,10 +279,7 @@ func (l *Listener) StreamGame(gameID string) {
 
 				// read the incantation for 'end game'
 				l.playingMtx.Lock()
-				l.gamePlayerNumber = -1
-				l.activeGameID = ""
-				l.gameGaveTime = false
-				l.gameOpponent = api.Player{}
+				l.resetGame()
 				l.playingMtx.Unlock()
 				return
 			}
@@ -351,5 +307,113 @@ func (l *Listener) StreamGame(gameID string) {
 	fmt.Printf("%s start game stream %s\n", ts(), gameID)
 	if err := api.ReadStream(endpoint, handler); err != nil {
 		log.Printf("ERR: StreamGame: %v\n", err)
+	}
+}
+
+func (l *Listener) resetGame() {
+	l.gamePlayerNumber = -1
+	l.activeGameID = ""
+	l.gameGaveTime = false
+	l.gameOpponent = api.Player{}
+}
+
+func (l *Listener) QueueChallenge(c api.Challenge) error {
+	c.InternalCreated = time.Now().UnixNano()
+	opp := c.Challenger
+
+	// ignore our own requests
+	if opp.ID == botID {
+		return nil
+	}
+
+	// only use standard initial position
+	if c.InitialFEN != "" && c.InitialFEN != "startpos" {
+		if err := api.DeclineChallenge(c.ID, "standard"); err != nil {
+			return err
+		}
+		return nil
+	}
+
+	tc := c.TimeControl
+
+	// standard; no variants e.g. Chess960
+	if c.Variant.Key != "standard" {
+		if err := api.DeclineChallenge(c.ID, "standard"); err != nil {
+			return err
+		}
+		return nil
+	}
+
+	// no unlimited, correspondence, etc
+	if tc.Type != "clock" {
+		if err := api.DeclineChallenge(c.ID, "timeControl"); err != nil {
+			return err
+		}
+		return nil
+	}
+
+	// bots wanting unrated can #SiO2
+	if opp.Title == "BOT" {
+		if tc.Increment == 0 {
+			if err := api.DeclineChallenge(c.ID, "timeControl"); err != nil {
+				return err
+			}
+			return nil
+		}
+	}
+
+	// if below 1 minute, must include increment for human players
+	if tc.Limit < 60 && tc.Increment == 0 {
+		if err := api.DeclineChallenge(c.ID, "tooFast"); err != nil {
+			return err
+		}
+		return nil
+	}
+
+	// longest game we accept is 5 minutes
+	// if time is 1 minute or higher, max increment is 5s
+	// below 1 minute we accept higher increments
+	if tc.Limit > 300 || (tc.Increment > 5 && tc.Limit >= 60) {
+		if err := api.DeclineChallenge(c.ID, "tooSlow"); err != nil {
+			return err
+		}
+		return nil
+	}
+
+	// if we're already playing a game queue the challenge
+	l.playingMtx.Lock()
+	l.challengeQueue = append(l.challengeQueue, c)
+	l.playingMtx.Unlock()
+
+	return nil
+}
+
+func (l *Listener) processChallengeQueue() {
+	for {
+		l.playingMtx.Lock()
+		isPlaying := l.activeGameID != ""
+		hasChallenges := len(l.challengeQueue) != 0
+		l.playingMtx.Unlock()
+
+		if isPlaying || !hasChallenges {
+			time.Sleep(1000 * time.Millisecond)
+			continue
+		}
+
+		l.playingMtx.Lock()
+		sort.Sort(l.challengeQueue)
+		for i := 0; i < len(l.challengeQueue); i++ {
+			c := l.challengeQueue[i]
+			if err := api.AcceptChallenge(c.ID); err != nil {
+				log.Printf("ERR: %v\n", c.ID)
+				l.challengeQueue = append(l.challengeQueue[:i], l.challengeQueue[i+1:]...)
+				i--
+				continue
+			}
+			break
+		}
+		l.playingMtx.Unlock()
+
+		time.Sleep(5 * time.Second)
 	}
 }

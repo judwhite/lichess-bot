@@ -81,4 +81,5 @@ type State struct {
 	WhiteInc  int    `json:"winc"`
 	BlackInc  int    `json:"binc"`
 	Status    string `json:"status"`
+	Winner    string `json:"winner"`
 }
