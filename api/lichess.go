@@ -98,6 +98,8 @@ func Lookup(fen, play string) (PositionResults, error) {
 }
 
 func ReadStream(endpoint string, handler func([]byte)) error {
+	fmt.Printf("%s REQ: %s %s\n", ts(), "ReadStream", endpoint)
+
 	req, err := http.NewRequest("GET", endpoint, nil)
 	if err != nil {
 		return fmt.Errorf("http.NewRequest: '%s' %v", endpoint, err)
@@ -132,41 +134,41 @@ func ReadStream(endpoint string, handler func([]byte)) error {
 	return nil
 }
 
-type ChallengeQueue struct {
-	bots map[string]BotInfo
+type BotQueue struct {
+	Bots []*BotInfo
 }
 
-func StreamBots() error {
+type BotInfo struct {
+	User        User
+	LastDecline time.Time
+	LastTimeout time.Time
+	LastAccept  time.Time
+	Win         int
+	Lose        int
+	Draw        int
+}
+
+func StreamBots() (*BotQueue, error) {
+	var q BotQueue
+
 	handler := func(ndjson []byte) {
 		var user User
 		if err := json.Unmarshal(ndjson, &user); err != nil {
 			log.Fatal(err)
 		}
 
-		bullet, ok := user.Perfs["bullet"]
-		if !ok {
-			return
-		}
-		if bullet.Games == 0 || bullet.Provisional {
-			return
-		}
-		if bullet.Rating < 2000 {
-			return
-		}
-		created := time.UnixMilli(user.CreatedAt)
-		seen := time.UnixMilli(user.SeenAt)
-		fmt.Printf("%s bullet: games: %d rating: %d created: %v seen: %v ago\n", user.ID, bullet.Games, bullet.Rating,
-			created.Format("Jan 2006"), time.Since(seen).Round(time.Second))
+		q.Bots = append(q.Bots, &BotInfo{User: user})
 	}
 
 	if err := ReadStream("https://lichess.org/api/bot/online", handler); err != nil {
-		return err
+		return nil, err
 	}
 
-	return nil
+	return &q, nil
 }
 
 func DeclineChallenge(id, reason string) error {
+	fmt.Printf("%s REQ: %s\n", ts(), "DeclineChallenge")
 	fmt.Printf("decline: '%s'\n", reason)
 
 	endpoint := fmt.Sprintf("https://lichess.org/api/challenge/%s/decline", id)
@@ -200,17 +202,24 @@ func DeclineChallenge(id, reason string) error {
 	return nil
 }
 
+var lichessBotToken string
+
 func AuthToken() string {
+	if lichessBotToken != "" {
+		return lichessBotToken
+	}
+
 	oauthToken, ok := os.LookupEnv("LICHESS_BOT_TOKEN")
 	if !ok {
 		log.Fatal("environment variable LICHESS_BOT_TOKEN not set")
 	}
 
-	return fmt.Sprintf("Bearer %s", oauthToken)
+	lichessBotToken = fmt.Sprintf("Bearer %s", oauthToken)
+	return lichessBotToken
 }
 
 func AcceptChallenge(id string) error {
-	fmt.Printf("* ACCEPT challenge %s\n", id)
+	fmt.Printf("%s REQ: %s\n", ts(), "AcceptChallenge")
 
 	endpoint := fmt.Sprintf("https://lichess.org/api/challenge/%s/accept", id)
 
@@ -238,6 +247,8 @@ func AcceptChallenge(id string) error {
 }
 
 func AddTime(gameID string, seconds int) error {
+	fmt.Printf("%s REQ: %s\n", ts(), "AddTime")
+
 	endpoint := fmt.Sprintf("https://lichess.org/api/round/%s/add-time/%d", gameID, seconds)
 
 	req, err := http.NewRequest("POST", endpoint, nil)
@@ -263,8 +274,18 @@ func AddTime(gameID string, seconds int) error {
 	return nil
 }
 
-func PlayMove(gameID, move string) error {
-	endpoint := fmt.Sprintf("https://lichess.org/api/bot/game/%s/move/%s", gameID, move)
+func PlayMove(gameID, move string, draw bool) error {
+	var sb strings.Builder
+	sb.WriteString("https://lichess.org/api/bot/game/")
+	sb.WriteString(gameID)
+	sb.WriteString("/move/")
+	sb.WriteString(move)
+
+	if draw {
+		sb.WriteString("?offeringDraw=true")
+	}
+
+	endpoint := sb.String()
 
 	req, err := http.NewRequest("POST", endpoint, nil)
 	if err != nil {
@@ -278,9 +299,8 @@ func PlayMove(gameID, move string) error {
 		return fmt.Errorf("http.DefaultClient.Do: '%s' %v", endpoint, err)
 	}
 
-	defer resp.Body.Close()
-
 	b, _ := ioutil.ReadAll(resp.Body)
+	resp.Body.Close()
 
 	if resp.StatusCode != 200 {
 		return fmt.Errorf("http status code %d '%s' body: '%s'", resp.StatusCode, endpoint, b)
@@ -290,6 +310,8 @@ func PlayMove(gameID, move string) error {
 }
 
 func Chat(gameID, room, text string) error {
+	fmt.Printf("%s REQ: %s\n", ts(), "Chat")
+
 	endpoint := fmt.Sprintf("https://lichess.org/api/bot/game/%s/chat", gameID)
 
 	data := url.Values{}
@@ -320,4 +342,84 @@ func Chat(gameID, room, text string) error {
 	}
 
 	return nil
+}
+
+func CreateChallenge(id string, rated bool, clockLimit, clockIncrement int, color, variant string) (string, error) {
+	fmt.Printf("%s REQ: %s '%s'\n", ts(), "CreateChallenge", id)
+
+	endpoint := fmt.Sprintf("https://lichess.org/api/challenge/%s", url.PathEscape(id))
+
+	data := url.Values{}
+	data.Add("rated", fmt.Sprintf("%v", rated))
+	data.Add("clock.limit", fmt.Sprintf("%d", clockLimit))
+	data.Add("clock.increment", fmt.Sprintf("%d", clockIncrement))
+	data.Add("color", color)
+	data.Add("variant", variant)
+
+	body := data.Encode()
+	req, err := http.NewRequest("POST", endpoint, strings.NewReader(body))
+	if err != nil {
+		return "", fmt.Errorf("http.NewRequest: '%s' %v", endpoint, err)
+	}
+
+	req.Header.Add("Authorization", AuthToken())
+	req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Add("Content-Length", fmt.Sprintf("%d", len(body)))
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("http.DefaultClient.Do: '%s' %v", endpoint, err)
+	}
+
+	defer resp.Body.Close()
+
+	b, _ := ioutil.ReadAll(resp.Body)
+
+	if resp.StatusCode != 200 {
+		return "", fmt.Errorf("http status code %d '%s' body: '%s'", resp.StatusCode, endpoint, b)
+	}
+
+	var response struct {
+		Challenge struct {
+			ID string `json:"id"`
+		} `json:"challenge"`
+	}
+
+	if err := json.Unmarshal(b, &response); err != nil {
+		return "", fmt.Errorf("'%s' body: '%s'", endpoint, b)
+	}
+
+	return response.Challenge.ID, nil
+}
+
+func CancelChallenge(id string) error {
+	fmt.Printf("%s REQ: %s\n", ts(), "CancelChallenge")
+
+	endpoint := fmt.Sprintf("https://lichess.org/api/challenge/%s/cancel", id)
+
+	req, err := http.NewRequest("POST", endpoint, nil)
+	if err != nil {
+		return fmt.Errorf("http.NewRequest: '%s' %v", endpoint, err)
+	}
+
+	req.Header.Add("Authorization", AuthToken())
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("http.DefaultClient.Do: '%s' %v", endpoint, err)
+	}
+
+	defer resp.Body.Close()
+
+	b, _ := ioutil.ReadAll(resp.Body)
+
+	if resp.StatusCode != 200 {
+		return fmt.Errorf("http status code %d '%s' body: '%s'", resp.StatusCode, endpoint, b)
+	}
+
+	return nil
+}
+
+func ts() string {
+	return fmt.Sprintf("[%s]", time.Now().Format("2006-01-02 15:04:05.000"))
 }

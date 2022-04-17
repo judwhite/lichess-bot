@@ -9,18 +9,11 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"trollfish-lichess/api"
 )
 
 func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-
-	go func() {
-		if err := api.StreamBots(); err != nil {
-			log.Printf("ERR: %v", err)
-		}
-	}()
 
 	input := make(chan string, 512)
 	output := make(chan string, 512)

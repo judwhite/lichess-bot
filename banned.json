@@ -1,0 +1,104 @@
+{
+  "banned": [
+    {
+      "id": "hyper_dragon_i555",
+      "reason": "http status code 400 'https://lichess.org/api/challenge/hyper_dragon_i555' body: '{\"error\":\"BOT Hyper_Dragon_I555 does not accept challenges.\"}'"
+    },
+    {
+      "id": "fastfoodchessshop",
+      "reason": "http status code 400 'https://lichess.org/api/challenge/fastfoodchessshop' body: '{\"error\":\"BOT FastFoodChessShop does not accept challenges.\"}'"
+    },
+    {
+      "id": "medipoluniversity",
+      "reason": "I'm not accepting challenges from bots."
+    },
+    {
+      "id": "the-fastest-bot",
+      "reason": "I'm not accepting challenges from bots."
+    },
+    {
+      "id": "wenndiesoldatbot",
+      "reason": "I'm not accepting challenges from bots."
+    },
+    {
+      "id": "theenisbotofficial",
+      "reason": "Please send me a casual challenge instead."
+    },
+    {
+      "id": "nationalbot",
+      "reason": "I'm not accepting challenges from bots."
+    },
+    {
+      "id": "elmichess",
+      "reason": "I'm not accepting challenges from bots."
+    },
+    {
+      "id": "stockfish_johan",
+      "reason": "Please send me a casual challenge instead."
+    },
+    {
+      "id": "kinzal",
+      "reason": "I'm not accepting challenges from bots."
+    },
+    {
+      "id": "botoflevelstigh",
+      "reason": "http status code 400 'https://lichess.org/api/challenge/botoflevelstigh' body: '{\"error\":\"BOT BOTOFLEVELSTIGH does not accept challenges.\"}'"
+    },
+    {
+      "id": "variants-strong-bot",
+      "reason": "http status code 400 'https://lichess.org/api/challenge/variants-strong-bot' body: '{\"error\":\"BOT Variants-Strong-Bot does not accept challenges.\"}'"
+    },
+    {
+      "id": "kablosuz_beyin",
+      "reason": "I'm not accepting challenges with this time control."
+    },
+    {
+      "id": "rudim-bot",
+      "reason": "I'm not accepting challenges from bots."
+    },
+    {
+      "id": "ultimate-moon-bot",
+      "reason": "Please send me a casual challenge instead."
+    },
+    {
+      "id": "variantsbot",
+      "reason": "I'm not willing to play this variant right now."
+    },
+    {
+      "id": "power_bot",
+      "reason": "I'm not accepting challenges from bots."
+    },
+    {
+      "id": "kaluganthota",
+      "reason": "soft-ban; timeout"
+    },
+    {
+      "id": "palisade",
+      "reason": "I'm not accepting challenges at the moment."
+    },
+    {
+      "id": "cheng-4",
+      "reason": "soft-ban; timeout"
+    },
+    {
+      "id": "myknightdude",
+      "reason": "This time control is too slow for me, please challenge again with a faster game."
+    },
+    {
+      "id": "grossobot",
+      "reason": "Please send me a casual challenge instead."
+    },
+    {
+      "id": "blue_lightningdragon",
+      "reason": "soft-ban; first move timeout"
+    },
+    {
+      "id": "normalblitzbulletbot",
+      "reason": "soft-ban; first move timeout"
+    },
+    {
+      "id": "catbot_14",
+      "reason": "I'm not accepting challenges from bots."
+    }
+  ]
+}
