@@ -97,7 +97,7 @@ func Lookup(fen, play string) (PositionResults, error) {
 	return result, nil
 }
 
-func ReadStream(endpoint string, handler func([]byte)) error {
+func ReadStream(endpoint string, handler func([]byte) bool) error {
 	fmt.Printf("%s REQ: %s %s\n", ts(), "ReadStream", endpoint)
 
 	req, err := http.NewRequest("GET", endpoint, nil)
@@ -123,7 +123,10 @@ func ReadStream(endpoint string, handler func([]byte)) error {
 		ndjson := r.Bytes()
 
 		if len(ndjson) != 0 {
-			handler(ndjson)
+			continueRead := handler(ndjson)
+			if !continueRead {
+				break
+			}
 		}
 	}
 
@@ -151,13 +154,14 @@ type BotInfo struct {
 func StreamBots() (*BotQueue, error) {
 	var q BotQueue
 
-	handler := func(ndjson []byte) {
+	handler := func(ndjson []byte) bool {
 		var user User
 		if err := json.Unmarshal(ndjson, &user); err != nil {
 			log.Fatal(err)
 		}
 
 		q.Bots = append(q.Bots, &BotInfo{User: user})
+		return true
 	}
 
 	if err := ReadStream("https://lichess.org/api/bot/online", handler); err != nil {

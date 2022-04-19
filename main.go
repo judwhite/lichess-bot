@@ -5,7 +5,9 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
 	"os/exec"
+	"os/signal"
 	"strings"
 	"sync"
 	"time"
@@ -15,6 +17,9 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	sigCtx, sigCancel := context.WithCancel(context.Background())
+	defer sigCancel()
+
 	input := make(chan string, 512)
 	output := make(chan string, 512)
 
@@ -22,7 +27,26 @@ func main() {
 		log.Fatal(err)
 	}
 
-	listener := New(input, output)
+	listener := New(sigCtx, input, output)
+
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, os.Interrupt)
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-sig:
+				sigCancel()
+				signal.Stop(sig)
+
+				if listener.Playing() {
+					fmt.Printf("shutting down after this game\n")
+				}
+				return
+			}
+		}
+	}()
 
 	if err := listener.Events(); err != nil {
 		log.Fatal(err)
