@@ -21,10 +21,6 @@
       "reason": "I'm not accepting challenges from bots."
     },
     {
-      "id": "theenisbotofficial",
-      "reason": "Please send me a casual challenge instead."
-    },
-    {
       "id": "nationalbot",
       "reason": "I'm not accepting challenges from bots."
     },
@@ -69,18 +65,6 @@
       "reason": "I'm not accepting challenges from bots."
     },
     {
-      "id": "kaluganthota",
-      "reason": "soft-ban; timeout"
-    },
-    {
-      "id": "palisade",
-      "reason": "I'm not accepting challenges at the moment."
-    },
-    {
-      "id": "cheng-4",
-      "reason": "soft-ban; timeout"
-    },
-    {
       "id": "myknightdude",
       "reason": "This time control is too slow for me, please challenge again with a faster game."
     },
@@ -98,6 +82,30 @@
     },
     {
       "id": "catbot_14",
+      "reason": "I'm not accepting challenges from bots."
+    },
+    {
+      "id": "requinbot",
+      "reason": "I'm not accepting challenges with this time control."
+    },
+    {
+      "id": "sargon-3ply",
+      "reason": "I'm not accepting challenges from bots."
+    },
+    {
+      "id": "resolved-bot",
+      "reason": "Please send me a casual challenge instead."
+    },
+    {
+      "id": "fisk_bot",
+      "reason": "I'm not accepting challenges with this time control."
+    },
+    {
+      "id": "mynameiswhatlol",
+      "reason": "Please send me a casual challenge instead."
+    },
+    {
+      "id": "sunfish_rs",
       "reason": "I'm not accepting challenges from bots."
     }
   ]
