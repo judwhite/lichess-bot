@@ -259,7 +259,7 @@ func (b *Board) Moves(moves ...string) {
 		toUCI := move[2:4]
 		var promote string
 		if len(move) > 4 {
-			promote = string(move[4])
+			promote = strings.ToUpper(string(move[4]))
 		}
 
 		// castling privileges
@@ -319,9 +319,9 @@ func (b *Board) Moves(moves ...string) {
 		// promotion
 		if promote != "" {
 			if activeColor == 0 {
-				b.Pos[to] = rune(promote[0])
+				b.Pos[to] = unicode.ToLower(rune(promote[0]))
 			} else {
-				b.Pos[to] = rune(promote[0] - 32)
+				b.Pos[to] = unicode.ToUpper(rune(promote[0]))
 			}
 		}
 
