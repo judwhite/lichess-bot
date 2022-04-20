@@ -60,7 +60,7 @@ func New(ctx context.Context, input chan<- string, output <-chan string) *Listen
 		l.botQueue = botQueue
 		l.botQueueMtx.Unlock()
 
-		l.challengeBot()
+		//l.challengeBot()
 	}()
 
 	return &l
