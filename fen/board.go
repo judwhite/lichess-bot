@@ -220,9 +220,9 @@ func (b *Board) checkMoveNotCheck(from, to int) bool {
 	return !newBoard.IsCheck()
 }
 
-func (b *Board) Moves(moves ...string) {
+func (b *Board) Moves(moves ...string) *Board {
 	if len(moves) == 0 {
-		return
+		return b
 	}
 
 	halfMoveClock := atoi(b.HalfmoveClock)
@@ -382,6 +382,8 @@ func (b *Board) Moves(moves ...string) {
 
 	b.HalfmoveClock = fmt.Sprintf("%d", halfMoveClock)
 	b.FullMove = fmt.Sprintf("%d", fullMove)
+
+	return b
 }
 
 func FENtoBoard(fen string) Board {
@@ -801,6 +803,13 @@ func (b *Board) pawnMoves(idx int) []int {
 	// one or two squares
 	rank := startRank + direction
 	oneSquareIndex := rank*8 + startFile
+
+	// TODO: debug code
+	if oneSquareIndex < 0 || oneSquareIndex >= len(b.Pos) {
+		fmt.Printf("FEN: \"%s\" idx: %d rank: %d startRank: %d direction: %d startFile: %d oneSquareIndex: %d\n",
+			b.FEN(), idx, rank, startRank, direction, startFile, oneSquareIndex)
+	}
+
 	if b.Pos[oneSquareIndex] == ' ' {
 		moves = append(moves, oneSquareIndex)
 
