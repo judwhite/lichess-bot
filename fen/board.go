@@ -64,7 +64,7 @@ var (
 	}
 )
 
-func (b *Board) FEN() string {
+func (b *Board) FENNoMoveClocks() string {
 	var fen strings.Builder
 	for i := 0; i < 8; i++ {
 		if fen.Len() != 0 {
@@ -94,9 +94,13 @@ func (b *Board) FEN() string {
 		}
 	}
 
-	fen.WriteString(fmt.Sprintf(" %s %s %s %s %s", b.ActiveColor, b.Castling, b.EnPassantSquare, b.HalfmoveClock, b.FullMove))
+	fen.WriteString(fmt.Sprintf(" %s %s %s", b.ActiveColor, b.Castling, b.EnPassantSquare))
 
 	return fen.String()
+}
+
+func (b *Board) FEN() string {
+	return fmt.Sprintf("%s %s %s", b.FENNoMoveClocks(), b.HalfmoveClock, b.FullMove)
 }
 
 func (b *Board) UCItoSAN(move string) string {
@@ -389,6 +393,14 @@ func (b *Board) Moves(moves ...string) *Board {
 func FENtoBoard(fen string) Board {
 	parts := strings.Split(fen, " ")
 	ranks := strings.Split(parts[0], "/")
+
+	if len(parts) < 6 {
+		if len(parts) < 5 {
+			parts = append(parts, "0")
+		}
+		parts = append(parts, "1")
+	}
+
 	b := Board{
 		ActiveColor:     parts[1],
 		Castling:        parts[2],

@@ -340,7 +340,7 @@ func (l *Listener) challengeBot() {
 			l.challengeQueueMtx.Unlock()
 
 			fmt.Printf("%s total_bots: %d. next challenge in ", ts(), len(bots))
-			for i := 5; i >= 1; i-- {
+			for i := 8; i >= 1; i-- {
 				if l.Quit() {
 					return
 				}

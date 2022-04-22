@@ -3,6 +3,7 @@ package analyze
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"log"
@@ -20,6 +21,13 @@ import (
 const startPosFEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
 const threads = 24
 const threadsHashMultiplier = 2048
+
+const Engine_Stockfish_15_NN_6e0680e = 1
+
+// id: 1
+// sfid = "sf15"
+// sfcommit = "6e0680e"
+// sfnn = "d0b74ce1e5eb"
 
 // TODO: get path from config file
 const syzygyPath = "/home/jud/projects/tablebase/3-4-5"
@@ -53,12 +61,14 @@ func (moves MovesReverse) Len() int {
 }
 
 type Move struct {
-	Ply      int    `json:"ply"`
-	UCI      string `json:"uci"`
-	SAN      string `json:"san"`
-	Eval     Eval   `json:"eval"`
-	BestMove Eval   `json:"best_move"`
-	IsMate   bool   `json:"mate,omitempty"`
+	Ply        int    `json:"ply"`
+	UCI        string `json:"uci"`
+	SAN        string `json:"san"`
+	Eval       Eval   `json:"eval"`
+	BestMove   Eval   `json:"best_move"`
+	IsMate     bool   `json:"mate,omitempty"`
+	PV         string `json:"pv,omitempty"`
+	OtherEvals []Eval `json:"-"`
 }
 
 type Eval struct {
@@ -77,6 +87,29 @@ type Eval struct {
 	PV         []string `json:"pv"`
 	Mated      bool     `json:"mated,omitempty"`
 	Raw        string   `json:"-"`
+}
+
+func (e Eval) Clone() Eval {
+	clone := Eval{
+		UCIMove:    e.UCIMove,
+		Depth:      e.Depth,
+		SelDepth:   e.SelDepth,
+		MultiPV:    e.MultiPV,
+		CP:         e.CP,
+		Mate:       e.Mate,
+		Nodes:      e.Nodes,
+		NPS:        e.NPS,
+		TBHits:     e.TBHits,
+		Time:       e.Time,
+		UpperBound: e.UpperBound,
+		LowerBound: e.LowerBound,
+		PV:         e.PV,
+		Mated:      e.Mated,
+		Raw:        e.Raw,
+	}
+	clone.PV = make([]string, len(e.PV))
+	copy(clone.PV, e.PV)
+	return clone
 }
 
 func (e Eval) String() string {
@@ -205,7 +238,37 @@ scoreLoop:
 	return eval
 }
 
-func getLines(ctx context.Context, ply, totalPlies int, output <-chan string, input chan<- string, maxTimePerPly time.Duration) []Eval {
+func bestEval(evals []Eval) Eval {
+	if len(evals) == 0 {
+		log.Fatalf("len(evals) = 0")
+	}
+
+	evals = evalsWithHighestDepth(evals)
+	return evals[0].Clone()
+}
+
+func evalsWithHighestDepth(evals []Eval) []Eval {
+	var maxDepth int
+	var hdEvals []Eval
+
+	// find maxDepth
+	for _, eval := range evals {
+		if eval.Depth > maxDepth {
+			maxDepth = eval.Depth
+		}
+	}
+
+	// make new list.. could do this one-shot, but mehh + memory allocation
+	for _, eval := range evals {
+		if eval.Depth == maxDepth {
+			hdEvals = append(hdEvals, eval)
+		}
+	}
+
+	return hdEvals
+}
+
+func getLines(ctx context.Context, ply, totalPlies int, output <-chan string, input chan<- string, maxTimePerPly time.Duration, allDepths bool) []Eval {
 	start := time.Now()
 
 	var moves []Eval
@@ -226,7 +289,7 @@ loop:
 				break loop
 			}
 
-			if !printEngineOutput && time.Since(start) > 30*time.Second {
+			if !printEngineOutput && time.Since(start) > 60*time.Second {
 				printEngineOutput = true
 			}
 			if printEngineOutput {
@@ -293,8 +356,15 @@ loop:
 		depth--
 	}
 
+	remove := func(i int) bool {
+		if allDepths {
+			return moves[i].Depth > depth
+		}
+		return moves[i].Depth != depth
+	}
+
 	for i := 0; i < len(moves); i++ {
-		if moves[i].Depth != depth {
+		if remove(i) {
 			moves = append(moves[:i], moves[i+1:]...)
 			i--
 			continue
@@ -333,7 +403,7 @@ readyOKLoop:
 			logInfo("uciok")
 			input <- fmt.Sprintf("setoption name Threads value %d", threads)
 			input <- fmt.Sprintf("setoption name Hash value %d", threads*threadsHashMultiplier)
-			input <- fmt.Sprintf("setoption name MultiPV value 1")
+			input <- fmt.Sprintf("setoption name MultiPV value 3")
 			input <- fmt.Sprintf("setoption name SyzygyPath value %s", syzygyPath)
 			input <- fmt.Sprintf("setoption name UCI_AnalyseMode value true")
 			input <- "isready"
@@ -351,7 +421,7 @@ readyOKLoop:
 		totalPlies := len(moves)
 		for {
 			ply := int(atomic.LoadInt64(&curPly))
-			evals := getLines(ctx, ply, totalPlies, output, input, maxTimePerPly)
+			evals := getLines(ctx, ply, totalPlies, output, input, maxTimePerPly, true)
 			select {
 			case <-ctx.Done():
 				logInfo("debug: getLines loop exited")
@@ -385,6 +455,7 @@ readyOKLoop:
 		sanMove := board.UCItoSAN(playerMoveUCI)
 
 		if board.Clone().Moves(playerMoveUCI).IsMate() {
+			// TODO: stalemate
 			movesEval = append(movesEval, Move{
 				Ply:    i,
 				UCI:    playerMoveUCI,
@@ -395,10 +466,25 @@ readyOKLoop:
 			continue
 		}
 
-		if len(movesEval) > 1 {
-			pgn := evalToPGN(board.Clone().Moves(playerMoveUCI).FEN(), depth, movesEval, false)
+		if len(movesEval) > 0 {
+			startFEN := board.Clone().Moves(playerMoveUCI).FEN()
+
+			pgn := evalToPGN(startFEN, depth, movesEval, false)
 			fmt.Println(pgn)
-			sort.Sort(MovesReverse(movesEval))
+
+			tbl := debugEvalTable(startFEN, movesEval)
+			fmt.Println(tbl)
+
+			bookMoves := createOpeningBook(startFEN, movesEval)
+			/*bookIndent, err := json.MarshalIndent(bookMoves, "", "  ")
+			if err != nil {
+				log.Fatal(err)
+			}
+			fmt.Printf("\n%s\n\n", string(bookIndent))*/
+
+			if err := saveBookMoves(bookMoves); err != nil {
+				log.Fatal(err)
+			}
 		}
 
 		m := strings.Join(beforeMoves, " ")
@@ -409,24 +495,23 @@ readyOKLoop:
 		for {
 			select {
 			case evals := <-sf:
-				if len(evals) > 1 {
-					for _, eval := range evals {
-						fmt.Printf("%s\n", eval.Raw)
-					}
-					log.Fatalf("len(evals) = %d, expected 1", len(evals))
-				}
 				if len(evals) == 0 {
 					break loop
 				}
 
-				bestMove := evals[0]
+				bestMove := bestEval(evals)
+
+				for _, eval := range evals {
+					fmt.Printf("depth=%d move=%s cp=%d\n", eval.Depth, eval.UCIMove, eval.CP)
+				}
 
 				newMove := Move{
-					Ply:      i,
-					UCI:      playerMoveUCI,
-					SAN:      sanMove,
-					BestMove: bestMove,
-					IsMate:   board.IsMate(),
+					Ply:        i,
+					UCI:        playerMoveUCI,
+					SAN:        sanMove,
+					BestMove:   bestMove,
+					IsMate:     board.IsMate(),
+					OtherEvals: append([]Eval(nil), evals...),
 				}
 
 				// not the best move, eval player's move
@@ -434,14 +519,19 @@ readyOKLoop:
 					input <- fmt.Sprintf("go depth %d searchmoves %s", depth, playerMoveUCI)
 
 					evals := <-sf
-					if len(evals) != 1 {
-						for _, eval := range evals {
-							fmt.Printf("%s\n", eval.Raw)
-						}
-						log.Fatalf("len(evals) = %d, expected 1", len(evals))
-					}
 
-					playerMove := evals[0]
+					highestDepth := evalsWithHighestDepth(evals)
+
+					bestMove = bestEval(highestDepth)
+
+					var playerMove Eval
+					for _, e := range highestDepth {
+						if e.UCIMove == playerMoveUCI {
+							playerMove = e
+							break
+						}
+					}
+					newMove.OtherEvals = append(newMove.OtherEvals, evals...)
 
 					playerScore := playerMove.CP
 					bestMoveScore := bestMove.CP
@@ -463,7 +553,7 @@ readyOKLoop:
 
 					if playerScore > bestMoveScore {
 						logInfo(fmt.Sprintf("- player's move was better than suggested line, %3d is better than %3d", playerMove.CP, bestMove.CP))
-						bestMove = playerMove
+						bestMove = playerMove.Clone()
 					}
 
 					playerMove.CP *= povMultiplier
@@ -479,6 +569,13 @@ readyOKLoop:
 					bestMove.Mate *= povMultiplier
 
 					newMove.Eval = bestMove
+				}
+
+				// we found the best move
+
+				for j := 0; j < len(newMove.OtherEvals); j++ {
+					newMove.OtherEvals[j].CP *= povMultiplier
+					newMove.OtherEvals[j].Mate *= povMultiplier
 				}
 
 				movesEval = append(movesEval, newMove)
@@ -497,8 +594,21 @@ readyOKLoop:
 	}
 
 	pgn := evalToPGN(startPosFEN, depth, movesEval, true)
-
 	fmt.Println(pgn)
+
+	tbl := debugEvalTable(startPosFEN, movesEval)
+	fmt.Println(tbl)
+
+	bookMoves := createOpeningBook(startPosFEN, movesEval)
+	bookIndent, err := json.MarshalIndent(bookMoves, "", "  ")
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Printf("%s\n\n", string(bookIndent))
+
+	if err := saveBookMoves(bookMoves); err != nil {
+		log.Fatal(err)
+	}
 
 	if err := ioutil.WriteFile("eval.pgn", []byte(pgn), 0644); err != nil {
 		fmt.Println(pgn)
@@ -514,6 +624,201 @@ readyOKLoop:
 	//logInfo("wg.Wait returned")
 
 	return nil
+}
+
+type BookMove struct {
+	FEN       string              `json:"fen"`
+	UCI       string              `json:"uci"`
+	SAN       string              `json:"san"`
+	Depth     int                 `json:"d"`
+	CP        int                 `json:"cp"`
+	DateTime  int64               `json:"dt"`
+	Mate      int                 `json:"m,omitempty"`
+	Mated     bool                `json:"cm,omitempty"`
+	Stalemate bool                `json:"sm,omitempty"`
+	Details   BookMoveEvalDetails `json:"x"`
+}
+
+func (bm BookMove) Equals(a BookMove) bool {
+	return bm.FEN == a.FEN &&
+		bm.UCI == a.UCI &&
+		bm.Depth == a.Depth &&
+		bm.CP == a.CP &&
+		bm.Mate == a.Mate &&
+		bm.Mated == a.Mated &&
+		bm.Stalemate == a.Stalemate &&
+		bm.Details.ID == a.Details.ID &&
+		bm.Details.PV == a.Details.PV
+}
+
+type BookMoveEvalDetails struct {
+	ID int `json:"id"`
+
+	SelDepth int    `json:"sd"`
+	Nodes    int    `json:"n"`
+	TBHits   int    `json:"tb,omitempty"`
+	Time     int    `json:"t"`
+	PV       string `json:"pv,omitempty"`
+}
+
+func saveBookMoves(book []BookMove) error {
+	var existingBook []BookMove
+
+	b, err := ioutil.ReadFile("book.json")
+	if err == nil {
+		//fmt.Printf("book.json %d bytes\n", len(b))
+		if err := json.Unmarshal(b, &existingBook); err != nil {
+			return err
+		}
+		//fmt.Printf("book.json existing length %d\n", len(existingBook))
+	}
+
+	c := make([]BookMove, len(existingBook))
+	if len(existingBook) > 0 {
+		copy(c, existingBook)
+	}
+
+	//fmt.Printf("len(c)=%d len(existingBook)=%d len(book)=%d\n", len(c), len(existingBook), len(book))
+
+	// combine and filter dupes
+	for _, move := range book {
+		found := false
+		for _, existingMove := range existingBook {
+			if move.FEN == existingMove.FEN && move.UCI == existingMove.UCI && move.Depth == existingMove.Depth && move.CP == existingMove.CP && move.Mate == existingMove.Mate && move.Mated == existingMove.Mated && move.Stalemate == existingMove.Stalemate {
+				//fmt.Printf("de-dupe: found fen %s move %s (%s) depth %d cp %d mate %d\n", move.FEN, move.UCI, move.SAN, move.Depth, move.CP, move.Mate)
+				found = true
+				break
+			}
+		}
+		if found {
+			continue
+		}
+		c = append(c, move)
+	}
+
+	//fmt.Printf("len(c)=%d len(existingBook)=%d len(book)=%d\n", len(c), len(existingBook), len(book))
+
+	bookJSON, err := json.Marshal(c)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	if err := ioutil.WriteFile("book.json", bookJSON, 0644); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func createOpeningBook(startFEN string, movesEval Moves) []BookMove {
+	sort.Sort(movesEval)
+
+	board := fen.FENtoBoard(startFEN)
+	dt := time.Now().UnixMilli()
+
+	var book []BookMove
+	for _, move := range movesEval {
+		evals := []Eval{move.BestMove}
+		if move.Eval.UCIMove != move.BestMove.UCIMove {
+			evals = append(evals, move.Eval)
+		}
+		if len(move.OtherEvals) > 0 {
+			evals = append(evals, move.OtherEvals...)
+		}
+
+		for _, e := range evals {
+			bookMove := BookMove{
+				FEN:       board.FENNoMoveClocks(),
+				UCI:       e.UCIMove,
+				SAN:       board.UCItoSAN(e.UCIMove),
+				Depth:     e.Depth,
+				CP:        e.CP,
+				DateTime:  dt, // TODO: store at time found
+				Mate:      e.Mate,
+				Mated:     e.Mated,
+				Stalemate: false, // TODO
+				Details: BookMoveEvalDetails{
+					ID:       Engine_Stockfish_15_NN_6e0680e, // TODO: make an external reference to save space
+					SelDepth: e.SelDepth,
+					Nodes:    e.Nodes,
+					TBHits:   e.TBHits,
+					Time:     e.Time,
+					PV:       strings.Join(e.PV, " "),
+				},
+			}
+
+			book = append(book, bookMove)
+		}
+
+		board.Moves(move.UCI)
+	}
+
+	sort.Sort(MovesReverse(movesEval))
+
+	return book
+}
+
+func debugEvalTable(startFEN string, movesEval Moves) string {
+	sort.Sort(movesEval)
+
+	var sb strings.Builder
+	board := fen.FENtoBoard(startFEN)
+
+	firstMove := movesEval[0]
+	firstMoveNumber := (firstMove.Ply / 2) + 1
+	sb.WriteString(fmt.Sprintf("%3d.", firstMoveNumber))
+	firstPlayer := firstMove.Ply % 2
+	if firstPlayer == 1 {
+		sb.WriteString(fmt.Sprintf("%-7s%-2s %7s", "", "", ""))
+		sb.WriteString(fmt.Sprintf("      %-7s%-2s %7s", "", "", ""))
+	}
+
+	for _, move := range movesEval {
+		playerNumber := move.Ply % 2
+
+		moveNumber := (move.Ply / 2) + 1
+		if playerNumber == 0 {
+			if moveNumber != firstMoveNumber {
+				sb.WriteString(fmt.Sprintf("%3d.", moveNumber))
+			}
+		} else {
+			sb.WriteString(" | ")
+		}
+
+		e1 := move.BestMove
+		e2 := move.Eval
+
+		var annotation string
+		if !move.IsMate {
+			diff := povDiff(playerNumber, e2, e1)
+			if diff <= -0.3 {
+				annotation = "??" // $4
+			} else if diff <= -0.2 {
+				annotation = "?" // $2
+			} else if diff <= -0.1 {
+				annotation = "?!" // $6
+			}
+		}
+
+		sb.WriteString(fmt.Sprintf("%-7s%-2s %7s", move.SAN, annotation, move.Eval.String()))
+
+		if move.UCI != move.BestMove.UCIMove {
+			bestMoveSAN := board.UCItoSAN(move.BestMove.UCIMove)
+			sb.WriteString(fmt.Sprintf(" top: %-7s%-2s %7s", bestMoveSAN, "", move.BestMove.String()))
+		} else {
+			sb.WriteString(fmt.Sprintf("      %-7s%-2s %7s", "", "", ""))
+		}
+
+		board.Moves(move.UCI)
+
+		if playerNumber == 1 {
+			sb.WriteString("\n")
+		}
+	}
+
+	sort.Sort(MovesReverse(movesEval))
+
+	return sb.String()
 }
 
 func evalToPGN(startFEN string, depth int, movesEval Moves, header bool) string {
@@ -580,7 +885,7 @@ func evalToPGN(startFEN string, depth int, movesEval Moves, header bool) string 
 				annotationWord = "Inaccuracy"
 			}
 
-			showVariations = diff <= -0.05
+			showVariations = diff < 0 //diff <= -0.05
 		}
 
 		sb.WriteString(move.SAN + annotation + "\n")
@@ -612,6 +917,8 @@ func evalToPGN(startFEN string, depth int, movesEval Moves, header bool) string 
 		prevEval = move.Eval.String()
 	}
 	sb.WriteString("*\n") // TODO: lazy, make this 1-0, 0-1, 1/2-1/2, or *
+
+	sort.Sort(MovesReverse(movesEval))
 
 	return sb.String()
 }
@@ -825,4 +1132,253 @@ func atoi(s string) int {
 		log.Fatal(err)
 	}
 	return n
+}
+
+func ReadBook() error {
+	var book []BookMove
+
+	bookJSON, err := ioutil.ReadFile("book.json")
+	if err != nil {
+		return err
+	}
+
+	//fmt.Printf("book.json %d bytes\n", len(bookJSON))
+	if err := json.Unmarshal(bookJSON, &book); err != nil {
+		return err
+	}
+	//fmt.Printf("book.json existing length %d\n", len(book))
+
+	for i := 0; i < len(book); i++ {
+		move := book[i]
+		if move.Depth < 10 {
+			book = append(book[:i], book[i+1:]...)
+			i--
+			continue
+		}
+	}
+
+	// de-dupe; TODO: sorting would make this more efficient
+	for i := 0; i < len(book)-1; i++ {
+		move1 := book[i]
+		for j := i + 1; j < len(book); j++ {
+			move2 := book[j]
+			if move1.Equals(move2) {
+				book = append(book[:j], book[j+1:]...)
+				j--
+				//fmt.Printf("de-dupe:\n- %#v equals\n- %#v\n", move1, move2)
+				continue
+			}
+		}
+	}
+
+	//fmt.Printf("new length after de-dupe %d\n", len(book))
+
+	sort.Slice(book, func(i, j int) bool {
+		a := book[i]
+		b := book[j]
+
+		if a.FEN != b.FEN {
+			return a.FEN < b.FEN
+		}
+
+		if a.UCI != b.UCI {
+			return a.UCI < b.UCI
+		}
+
+		if a.Depth != b.Depth {
+			return a.Depth < b.Depth
+		}
+
+		if a.Details.ID != b.Details.ID {
+			return a.Details.ID < b.Details.ID
+		}
+
+		if a.CP != b.CP {
+			return a.CP < b.CP
+		}
+
+		if a.Mate != b.Mate {
+			return a.Mate < b.Mate
+		}
+
+		if len(a.Details.PV) != len(b.Details.PV) {
+			return len(a.Details.PV) < len(b.Details.PV)
+		}
+
+		if a.Details.PV != b.Details.PV {
+			return a.Details.PV < b.Details.PV
+		}
+
+		return a.DateTime < b.DateTime
+	})
+
+	bookJSON, err = json.Marshal(book)
+	if err != nil {
+		return err
+	}
+
+	if err := ioutil.WriteFile("book.json", bookJSON, 0644); err != nil {
+		return err
+	}
+
+	bookFormattedJSON, err := json.MarshalIndent(book, "", "  ")
+	if err != nil {
+		return err
+	}
+
+	if err := ioutil.WriteFile("book-formatted.json", bookFormattedJSON, 0644); err != nil {
+		return err
+	}
+
+	///
+
+	var fens []string
+bookLoop:
+	for i := 0; i < len(book); i++ {
+		move := book[i]
+		if move.FEN == startPosFEN {
+			continue
+		}
+
+		for j := 0; j < len(fens); j++ {
+			if fens[j] == move.FEN {
+				continue bookLoop
+			}
+		}
+
+		fens = append(fens, move.FEN)
+	}
+
+	/*_, err = getBlessedMove("rnbqkb1r/pp3ppp/2p1pn2/3p2B1/2PP4/2N2N2/PP2PPPP/R2QKB1R b KQkq -", book)
+	if err != nil {
+		return err
+	}*/
+
+	for _, posFEN := range fens {
+		_, err := getBlessedMove(posFEN, book)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+type BlessedMove struct {
+	FEN  string `json:"fen"`
+	UCI  string `json:"uci"`
+	SAN  string `json:"san"`
+	CP   int    `json:"cp"`
+	Mate int    `json:"mate,omitempty"`
+}
+
+func getBlessedMove(posFEN string, book []BookMove) (BlessedMove, error) {
+	type depthRange struct {
+		minDepth int
+		maxDepth int
+	}
+
+	white := strings.Contains(posFEN, " w ")
+	var povMultiplier int
+	if white {
+		povMultiplier = 1
+	} else {
+		povMultiplier = -1
+	}
+
+	//fmt.Printf("FEN: %s\n", posFEN)
+
+	uq := make(map[string][]BookMove)
+	for i := 0; i < len(book); i++ {
+		move := book[i]
+
+		if move.FEN != posFEN {
+			continue
+		}
+		if move.Depth < 18 {
+			continue
+		}
+
+		move.CP *= povMultiplier
+		move.Mate *= povMultiplier
+
+		//fmt.Printf("d=%2d move=%-7s uci=%-4s cp=%3d mate=%3d\n", move.Depth, move.SAN, move.UCI, move.CP, move.Mate)
+
+		uq[move.UCI] = append(uq[move.UCI], move)
+	}
+
+	ranges := []depthRange{
+		{minDepth: 18, maxDepth: 30},
+		{minDepth: 30, maxDepth: 40},
+		{minDepth: 40, maxDepth: 100},
+	}
+
+	ensemble := make(map[string]int)
+	ensembleCount := make(map[string]int)
+
+	for _, depths := range ranges {
+		minDepth, maxDepth := depths.minDepth, depths.maxDepth
+		//fmt.Printf("depth = [%d, %d]\n", minDepth, maxDepth)
+		for uci, v := range uq {
+			//board := fen.FENtoBoard(posFEN)
+			//san := board.UCItoSAN(uci)
+
+			var num, denom, samples int
+			for depth := minDepth; depth <= maxDepth; depth++ {
+				var depthSum int
+				var depthCount int
+				for _, eval := range v {
+					if eval.Depth != depth {
+						continue
+					}
+					//fmt.Printf("depth: %2d san: %5s cp: %3d\n", eval.Depth, san, eval.CP)
+					depthSum += eval.CP
+					depthCount++
+					samples++
+				}
+				if depthCount != 0 {
+					depthAverage := depthSum / depthCount
+					num += depthAverage * depth
+					denom += depth
+				}
+			}
+
+			if samples != 0 {
+				cp := num / denom
+				ensemble[uci] += cp
+				ensembleCount[uci] += 1
+
+				//fmt.Printf("depth: [%d, %d] uci: %s san: %5s cp: %3d samples: %d\n", minDepth, maxDepth, uci, san, cp, samples)
+			}
+		}
+	}
+
+	var moves []BookMove
+	for uci, count := range ensembleCount {
+		ensemble[uci] /= count
+		cp := ensemble[uci]
+		moves = append(moves, BookMove{UCI: uci, CP: cp})
+	}
+
+	sort.Slice(moves, func(i, j int) bool {
+		return moves[i].CP > moves[j].CP
+	})
+
+	bestMove := moves[0]
+	board := fen.FENtoBoard(posFEN)
+
+	for _, move := range moves {
+		fmt.Printf("%7s %s: %0.2f\n", board.UCItoSAN(move.UCI), move.UCI, float64(move.CP)/100)
+	}
+	san := board.UCItoSAN(bestMove.UCI)
+
+	blessed := BlessedMove{FEN: posFEN, UCI: bestMove.UCI, SAN: san, CP: bestMove.CP * povMultiplier, Mate: bestMove.Mate * povMultiplier}
+	blessedJSON, err := json.Marshal(blessed)
+	if err != nil {
+		return BlessedMove{}, err
+	}
+
+	fmt.Printf("%s\n", blessedJSON)
+
+	return blessed, nil
 }

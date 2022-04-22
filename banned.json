@@ -65,20 +65,8 @@
       "reason": "I'm not accepting challenges from bots."
     },
     {
-      "id": "myknightdude",
-      "reason": "This time control is too slow for me, please challenge again with a faster game."
-    },
-    {
       "id": "grossobot",
       "reason": "Please send me a casual challenge instead."
-    },
-    {
-      "id": "blue_lightningdragon",
-      "reason": "soft-ban; first move timeout"
-    },
-    {
-      "id": "normalblitzbulletbot",
-      "reason": "soft-ban; first move timeout"
     },
     {
       "id": "catbot_14",
@@ -107,6 +95,19 @@
     {
       "id": "sunfish_rs",
       "reason": "I'm not accepting challenges from bots."
+    },
+    {
+      "id": "dark_cloud_bot",
+      "reason": "This time control is too slow for me, please challenge again with a faster game."
+    },
+    {
+      "id": "endogenetic-bot",
+      "reason": "Please send me a casual challenge instead."
+    },
+    {
+      "id": "combuskengine",
+      "reason": "I'm not accepting challenges from bots."
+    },
     }
   ]
 }
