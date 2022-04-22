@@ -268,14 +268,14 @@ func evalsWithHighestDepth(evals []Eval) []Eval {
 	return hdEvals
 }
 
-func getLines(ctx context.Context, ply, totalPlies int, output <-chan string, input chan<- string, maxTimePerPly time.Duration, allDepths bool) []Eval {
+func getLines(ctx context.Context, ply, totalPlies int, output <-chan string, input chan<- string, maxTimePerPly time.Duration, allDepths bool, showEngineOutputAfter time.Duration) []Eval {
 	start := time.Now()
 
 	var moves []Eval
 
-	var depth int
-	var printEngineOutput bool
+	var maxDepth int
 	var stopped bool
+	var printEngineOutput bool
 
 	timeout := time.NewTimer(maxTimePerPly)
 loop:
@@ -289,7 +289,7 @@ loop:
 				break loop
 			}
 
-			if !printEngineOutput && time.Since(start) > 60*time.Second {
+			if !printEngineOutput && time.Since(start) > showEngineOutputAfter {
 				printEngineOutput = true
 			}
 			if printEngineOutput {
@@ -304,14 +304,14 @@ loop:
 					continue
 				}
 
-				if eval.Depth > depth {
-					depth = eval.Depth
+				if eval.Depth > maxDepth {
+					maxDepth = eval.Depth
 				}
 
 				// remove evals with less nodes searched
 				for i := 0; i < len(moves); i++ {
-					if moves[i].Depth == eval.Depth && moves[i].MultiPV == eval.MultiPV {
-						if moves[i].Nodes < eval.Nodes {
+					if moves[i].Depth == eval.Depth && moves[i].UCIMove == eval.UCIMove {
+						if moves[i].Nodes <= eval.Nodes {
 							moves = append(moves[:i], moves[i+1:]...)
 							i--
 							continue
@@ -323,10 +323,10 @@ loop:
 			}
 
 		case <-timeout.C:
-			if depth == 0 {
+			if maxDepth == 0 {
 				return nil
 			}
-			logInfo(fmt.Sprintf("per-move timeout expired (%v), using what we have at depth %d", maxTimePerPly, depth))
+			logInfo(fmt.Sprintf("per-move timeout expired (%v), using what we have at depth %d", maxTimePerPly, maxDepth))
 			input <- "stop"
 			stopped = true
 		}
@@ -343,24 +343,27 @@ loop:
 	depth1Count, depth2Count := 0, 0
 
 	for i := 0; i < len(moves); i++ {
-		if moves[i].Depth == depth {
+		if moves[i].Depth == maxDepth {
 			depth1Count++
 		}
-		if moves[i].Depth == depth-1 {
+		if moves[i].Depth == maxDepth-1 {
 			depth2Count++
 		}
 	}
 
 	if depth1Count < depth2Count {
-		logInfo(fmt.Sprintf("depth: %d depth1Count (%d) < depth2Count (%d), using depth: %d", depth, depth1Count, depth2Count, depth-1))
-		depth--
+		logInfo(fmt.Sprintf("depth: %d depth1Count (%d) < depth2Count (%d), using depth: %d", maxDepth, depth1Count, depth2Count, maxDepth-1))
+		maxDepth--
 	}
 
 	remove := func(i int) bool {
-		if allDepths {
-			return moves[i].Depth > depth
+		if moves[i].Depth < 10 {
+			return true
 		}
-		return moves[i].Depth != depth
+		if allDepths {
+			return moves[i].Depth > maxDepth
+		}
+		return moves[i].Depth != maxDepth
 	}
 
 	for i := 0; i < len(moves); i++ {
@@ -421,7 +424,7 @@ readyOKLoop:
 		totalPlies := len(moves)
 		for {
 			ply := int(atomic.LoadInt64(&curPly))
-			evals := getLines(ctx, ply, totalPlies, output, input, maxTimePerPly, true)
+			evals := getLines(ctx, ply, totalPlies, output, input, maxTimePerPly, true, 60*time.Second)
 			select {
 			case <-ctx.Done():
 				logInfo("debug: getLines loop exited")
@@ -525,7 +528,8 @@ readyOKLoop:
 					bestMove = bestEval(highestDepth)
 
 					var playerMove Eval
-					for _, e := range highestDepth {
+					for i := 0; i < len(highestDepth); i++ {
+						e := highestDepth[i]
 						if e.UCIMove == playerMoveUCI {
 							playerMove = e
 							break
@@ -600,11 +604,11 @@ readyOKLoop:
 	fmt.Println(tbl)
 
 	bookMoves := createOpeningBook(startPosFEN, movesEval)
-	bookIndent, err := json.MarshalIndent(bookMoves, "", "  ")
+	/*bookIndent, err := json.MarshalIndent(bookMoves, "", "  ")
 	if err != nil {
 		log.Fatal(err)
 	}
-	fmt.Printf("%s\n\n", string(bookIndent))
+	fmt.Printf("%s\n\n", string(bookIndent))*/
 
 	if err := saveBookMoves(bookMoves); err != nil {
 		log.Fatal(err)
@@ -1254,11 +1258,23 @@ bookLoop:
 		return err
 	}*/
 
+	var blessedBook []BlessedMove
+
 	for _, posFEN := range fens {
-		_, err := getBlessedMove(posFEN, book)
+		blessedMove, err := getBlessedMove(posFEN, book)
 		if err != nil {
 			return err
 		}
+		blessedBook = append(blessedBook, blessedMove)
+	}
+
+	blessedJSON, err := json.MarshalIndent(blessedBook, "", "  ")
+	if err != nil {
+		return err
+	}
+
+	if err := ioutil.WriteFile("blessed-book.json", blessedJSON, 0644); err != nil {
+		return err
 	}
 
 	return nil
@@ -1309,8 +1325,8 @@ func getBlessedMove(posFEN string, book []BookMove) (BlessedMove, error) {
 
 	ranges := []depthRange{
 		{minDepth: 18, maxDepth: 30},
-		{minDepth: 30, maxDepth: 40},
-		{minDepth: 40, maxDepth: 100},
+		{minDepth: 31, maxDepth: 40},
+		{minDepth: 41, maxDepth: 100},
 	}
 
 	ensemble := make(map[string]int)
