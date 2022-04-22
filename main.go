@@ -14,27 +14,38 @@ import (
 	"trollfish-lichess/analyze"
 )
 
-const depth = 40
-
-var maxTimePerPly = 2 * time.Minute
+var maxTimePerPly = 10 * time.Minute
 
 func main() {
-	moves := strings.Split("e2e4 c7c5 g1f3 d7d6 d2d4 c5d4 f3d4 g8f6 b1c3 a7a6 c1g5 e7e6 f1d3 f8e7 g5f6 e7f6 d4f3 e8g8 d1d2 d8a5 e1g1 a5b6 a2a4 b8d7 a1e1 h7h6 c3a2 f8e8 b2b4 a6a5 d3b5 f6e7 e4e5 a5b4 a2b4 b6c7 b4d3 e7f8 e5d6 f8d6 b5d7 c7d7 d3e5 d7d8 e1a1 a8a6 a1a3 d6c7 d2d8 c7d8 a3c3 d8f6 c3c4 a6a5 e5g4 f6e7 f3d4 e8d8 d4b3 a5a8 a4a5 e7f8 g4e3 c8d7 f1d1 d7b5 d1d8 a8d8 c4d4 d8c8 h2h4 f8e7 g2g3 c8c3 g1g2 g7g5 h4g5 e7g5 g2f3 b5c6 f3g4 g5e3 f2e3 c3e3 g4h5 g8g7 d4g4 g7h7 b3d4 c6e4 d4b5 e4f3 b5d6 e3e1", " ")
-	err := analyze.QuickAnalysis(context.Background(), moves, 20)
-	if err != nil {
+	analysis()
+	//runLichessBot()
+}
+
+func analysis() {
+	/*if err := analyze.ReadBook(); err != nil {
+		log.Fatal(err)
+	}*/
+
+	moves := strings.Split("e2e4 c7c5 g1f3 b8c6 f1b5 e7e6 e1g1 g8e7 c2c3 a7a6 b5a4 d7d5 e4d5 e7d5 a4c6 b7c6 c3c4 d5e7 b1c3 f7f6 c3a4 e7g6 d2d3 e6e5 c1e3 c8f5 f3e1 g6f4 d1f3 g7g5 e3f4 g5f4 a4c5 e8f7 c5e4 h8g8 f3e2 f5g4 f2f3 g4e6 g1h1 a8b8 b2b3 c6c5 f1g1 f8e7 e1c2 g8g6 a1b1 d8c7 e4f2 e6d7 f2e4 d7c6 e4c3 c7d7 c3d5 b8g8 d5e7 f7e7 c2e1 g6h6 e2f2 e7f7 g1f1 g8g5 b1b2 g5h5 h1g1 h5h2 f2c5 h2h5 c5b6 f6f5 g1f2 d7e7 b3b4 e5e4 b6c5 e7f6 b2c2 h5h1 d3e4 f5e4 f1g1 f6h4 f2f1 h1g1 c5g1 e4e3 e1d3 h4g3 c2e2 f7f8 e2e3 f4e3 g1e3 h6h1 f1e2 g3g2 e3f2 c6f3 e2e3 h1h3 f2g2 f3g2 e3d4 g2f1 d3e5 f8e7 b4b5 a6b5 c4b5 f1b5 d4e4 h3h5 e4f4 h5e5 f4e5 e7f7 e5f5 h7h6 f5e4 f7f6 e4d5 h6h5 d5c5 b5e8 c5d4 f6f5 a2a4 e8a4 d4e3 f5g4 e3d3 h5h4 d3e3 h4h3 e3f2 a4b5 f2e1 h3h2 e1d1 h2h1Q d1c2 h1f3 c2b2 b5a4 b2b1 f3c3 b1a2 a4b3 a2a3 b3e6 a3a4 e6d7", " ")
+
+	moves = moves[0:11]
+
 	a := analyze.New()
 
 	// first pass, very quick
-	if err := a.AnalyzeGame(context.Background(), moves, 18, 8*time.Second); err != nil {
+	if err := a.AnalyzeGame(context.Background(), moves, 24, 30*time.Second); err != nil {
 		log.Fatal(err)
 	}
 
-	if err := a.AnalyzeGame(context.Background(), moves, depth, maxTimePerPly); err != nil {
-		log.Fatal(err)
+	depths := []int{50}
+	for _, depth := range depths {
+		if err := a.AnalyzeGame(context.Background(), moves, depth, maxTimePerPly); err != nil {
+			log.Fatal(err)
+		}
 	}
 }
 
-func main2() {
+func runLichessBot() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
