@@ -630,6 +630,128 @@ readyOKLoop:
 	return nil
 }
 
+func (a *Analyzer) AnalyzePosition(ctx context.Context, fenPos string, depth int, maxTime time.Duration) error {
+	logInfo("start")
+
+	board := fen.FENtoBoard(fenPos)
+
+	if board.IsMate() {
+		// TODO: stalemate
+		// TODO: what if a position is already game over?
+		/*movesEval = append(movesEval, Move{
+			Ply:    i,
+			UCI:    playerMoveUCI,
+			SAN:    sanMove,
+			IsMate: true,
+			Eval:   Eval{Mated: true},
+		})*/
+		return fmt.Errorf("TODO: position '%s' is already game over", fenPos)
+	}
+
+	var white bool
+	if board.ActiveColor == "w" {
+		white = true
+	} else if board.ActiveColor == "b" {
+		white = false
+	} else {
+		return fmt.Errorf("active color '%s'; expected w or b", board.ActiveColor)
+	}
+
+	input := make(chan string, 512)
+	output := make(chan string, 512)
+
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	wg, err := startStockfish(ctx, input, output)
+	if err != nil {
+		return err
+	}
+
+	input <- "uci"
+
+readyOKLoop:
+	for line := range output {
+		switch line {
+		case "uciok":
+			logInfo("uciok")
+			input <- fmt.Sprintf("setoption name Threads value %d", threads)
+			input <- fmt.Sprintf("setoption name Hash value %d", threads*threadsHashMultiplier)
+			input <- fmt.Sprintf("setoption name MultiPV value 6")
+			input <- fmt.Sprintf("setoption name SyzygyPath value %s", syzygyPath)
+			input <- fmt.Sprintf("setoption name UCI_AnalyseMode value true")
+			input <- "isready"
+		case "readyok":
+			input <- "ucinewgame"
+			input <- fmt.Sprintf("position fen %s", fenPos)
+			input <- fmt.Sprintf("go depth %d", depth)
+			break readyOKLoop
+		}
+	}
+
+	logInfo(fmt.Sprintf("depth = %d", depth))
+
+	var povMultiplier int
+	if white {
+		povMultiplier = 1
+	} else {
+		povMultiplier = -1
+	}
+
+	evals := getLines(ctx, 0, 1, output, input, maxTime, true, 15*time.Second)
+	if len(evals) == 0 {
+		return fmt.Errorf("no evaluations returned for fen '%s'", fenPos)
+	}
+
+	logInfo("sending quit")
+	input <- "quit"
+
+	for _, eval := range evals {
+		fmt.Printf("depth=%d move=%s cp=%d\n", eval.Depth, eval.UCIMove, eval.CP)
+	}
+
+	bestMove := bestEval(evals).Clone()
+	bestMove.CP *= povMultiplier
+	bestMove.Mate *= povMultiplier
+
+	board.Moves()
+	newMove := Move{
+		Ply:        1,
+		UCI:        bestMove.UCIMove,
+		SAN:        board.UCItoSAN(bestMove.UCIMove),
+		Eval:       bestMove.Clone(),
+		BestMove:   bestMove.Clone(),
+		IsMate:     board.IsMate(),
+		OtherEvals: append([]Eval(nil), evals...),
+	}
+
+	for j := 0; j < len(newMove.OtherEvals); j++ {
+		newMove.OtherEvals[j].CP *= povMultiplier
+		newMove.OtherEvals[j].Mate *= povMultiplier
+	}
+
+	logInfo(fmt.Sprintf("%3d/%3d %3d. top_move: %-7s top_cp: %6d top_mate: %2d",
+		1, 1, 1, newMove.SAN, bestMove.CP, bestMove.Mate))
+
+	var movesEval Moves
+	movesEval = append(movesEval, newMove)
+
+	bookMoves := createOpeningBook(fenPos, movesEval)
+	if err := saveBookMoves(bookMoves); err != nil {
+		log.Fatal(err)
+	}
+
+	pgn := evalToPGN(fenPos, depth, movesEval, false)
+	fmt.Println(pgn)
+
+	tbl := debugEvalTable(fenPos, movesEval)
+	fmt.Println(tbl)
+
+	cancel()
+	wg.Wait()
+
+	return nil
+}
+
 type BookMove struct {
 	FEN       string              `json:"fen"`
 	UCI       string              `json:"uci"`
