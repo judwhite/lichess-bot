@@ -20,6 +20,23 @@ type Board struct {
 	FullMove        string
 }
 
+type Color int
+
+const (
+	WhitePieces Color = 1
+	BlackPieces Color = -1
+)
+
+func (b *Board) ActivePlayer() Color {
+	if b.ActiveColor == "w" {
+		return WhitePieces
+	} else if b.ActiveColor == "b" {
+		return BlackPieces
+	}
+	log.Fatalf("unhandled ActiveColor '%s'", b.ActiveColor)
+	return math.MinInt64
+}
+
 type nav struct {
 	file int
 	rank int
@@ -233,7 +250,7 @@ func (b *Board) Moves(moves ...string) *Board {
 	fullMove := atoi(b.FullMove)
 
 	var activeColor int
-	if b.ActiveColor == "b" {
+	if b.ActivePlayer() == BlackPieces {
 		activeColor = 1
 	}
 
@@ -457,7 +474,7 @@ func (b *Board) IsCheck() bool {
 	)
 
 	var white bool
-	if b.ActiveColor == "w" {
+	if b.ActivePlayer() == WhitePieces {
 		ourKing = 'K'
 		enemyKing, enemyQueen, enemyRook, enemyBishop, enemyKnight, enemyPawn = 'k', 'q', 'r', 'b', 'n', 'p'
 		white = true
@@ -618,7 +635,7 @@ type fromTo struct {
 
 func (b *Board) LegalMoves() []fromTo {
 	var king, queen, bishop, knight, rook, pawn rune
-	if b.ActiveColor == "w" {
+	if b.ActivePlayer() == WhitePieces {
 		king, queen, bishop, knight, rook, pawn = 'K', 'Q', 'B', 'N', 'R', 'P'
 	} else {
 		king, queen, bishop, knight, rook, pawn = 'k', 'q', 'b', 'n', 'r', 'p'
@@ -655,7 +672,7 @@ func (b *Board) LegalMoves() []fromTo {
 
 func (b *Board) isEnemyPiece(p rune) bool {
 	var king, queen, bishop, knight, rook, pawn rune
-	if b.ActiveColor == "w" {
+	if b.ActivePlayer() == WhitePieces {
 		king, queen, bishop, knight, rook, pawn = 'k', 'q', 'b', 'n', 'r', 'p'
 	} else {
 		king, queen, bishop, knight, rook, pawn = 'K', 'Q', 'B', 'N', 'R', 'P'
@@ -698,9 +715,9 @@ func (b *Board) kingMoves(idx int) []int {
 			}
 		}
 	}
-	if b.ActiveColor == "w" && idx == uciToIndex("e1") {
+	if b.ActivePlayer() == WhitePieces && idx == uciToIndex("e1") {
 		maybeAdd('K', 'Q')
-	} else if b.ActiveColor == "b" && idx == uciToIndex("e8") {
+	} else if b.ActivePlayer() == BlackPieces && idx == uciToIndex("e8") {
 		maybeAdd('k', 'q')
 	}
 
@@ -802,7 +819,7 @@ func (b *Board) pawnMoves(idx int) []int {
 	var moves []int
 
 	var direction, homeRank int
-	if b.ActiveColor == "w" {
+	if b.ActivePlayer() == WhitePieces {
 		direction = -1
 		homeRank = 6
 	} else {

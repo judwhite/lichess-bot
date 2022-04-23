@@ -27,20 +27,26 @@ const threadsHashMultiplier = 2048 // 24*2048 = 49152
 const hashMemory = threads * threadsHashMultiplier
 
 //const hashMemory = 95_000
-const multiPV = 12
+const multiPV = 8
 
-const tier1Depth = 30
-const tier1MaxSurvivors = 8
-const tier1MaxTime = 10 * time.Minute
+// TODO: put in config
+const stockfishBinary = "/home/jud/projects/trollfish/stockfish/stockfish"
+const stockfishDir = "/home/jud/projects/trollfish/stockfish"
 
-const tier2Depth = 40
-const tier2MaxSurvivors = 5
-const tier2MaxTime = 15 * time.Minute
+type EvalTier struct {
+	Depth             int
+	MaxSurvivors      int
+	MaxTime           time.Duration
+	SurvivorThreshold float64
+}
 
-const tier3Depth = 50
-const tier3MaxTime = 60 * time.Minute
-
-const cutoff = -0.12
+var DefaultEvalTiers = []EvalTier{
+	{Depth: 24, MaxSurvivors: 6, MaxTime: 5 * time.Minute, SurvivorThreshold: -0.12},
+	{Depth: 32, MaxSurvivors: 5, MaxTime: 10 * time.Minute, SurvivorThreshold: -0.11},
+	{Depth: 40, MaxSurvivors: 4, MaxTime: 10 * time.Minute, SurvivorThreshold: -0.10},
+	{Depth: 44, MaxSurvivors: 3, MaxTime: 10 * time.Minute, SurvivorThreshold: -0.09},
+	{Depth: 50, MaxTime: 60 * time.Minute},
+}
 
 // const Engine_Stockfish_15_NN_6e0680e = 1
 // id: 1
@@ -86,6 +92,27 @@ type Move struct {
 	PV       string `json:"pv,omitempty"`
 }
 
+type Evals []Eval
+
+func (e Evals) Get(uciMove string) (Eval, bool) {
+	evals := maxDepthEvals(e)
+	for _, eval := range evals {
+		if eval.UCIMove == uciMove {
+			return eval.Clone(), true
+		}
+	}
+	return Eval{}, false
+}
+
+func (e Evals) Contains(uciMove string) bool {
+	for _, eval := range e {
+		if eval.UCIMove == uciMove {
+			return true
+		}
+	}
+	return false
+}
+
 type Eval struct {
 	UCIMove    string   `json:"uci"`
 	Depth      int      `json:"depth"`
@@ -105,15 +132,17 @@ type Eval struct {
 }
 
 func (e Eval) Score() int {
-	if e.Mate != 0 {
-		if e.Mate > 0 {
-			return 155_00 - e.Mate
-		} else {
-			return -155_00 - e.Mate
-		}
+	if e.Mate > 0 {
+		return 400_00 - e.Mate*100 // closer mates equal higher numbers
+	} else if e.Mate < 0 {
+		return -300_00 + e.Mate*100 // mates further away equal more negative numbers
 	}
 
 	return e.CP
+}
+
+func (e Eval) Empty() bool {
+	return e.UCIMove == ""
 }
 
 func (e Eval) Clone() Eval {
@@ -139,22 +168,27 @@ func (e Eval) Clone() Eval {
 	return clone
 }
 
-func (e Eval) String() string {
+func (e Eval) POVCP(color fen.Color) int {
+	return e.CP * int(color)
+}
+
+func (e Eval) POVMate(color fen.Color) int {
+	return e.Mate * int(color)
+}
+
+func (e Eval) String(color fen.Color) string {
 	if e.Mated {
 		return ""
 	}
 
 	if e.Mate != 0 {
-		return fmt.Sprintf("#%d", e.Mate)
+		return fmt.Sprintf("#%d", e.POVMate(color))
 	}
 
-	var sbEval strings.Builder
-	sbEval.WriteString(fmt.Sprintf("%.2f", float64(e.CP)/100))
-	s := sbEval.String()
+	s := fmt.Sprintf("%.2f", float64(e.POVCP(color)/100))
 
 	if s == "+0.00" || s == "-0.00" {
 		return "0.00"
-		//return fmt.Sprintf("0.00 %#v", e)
 	}
 
 	return s
@@ -223,33 +257,26 @@ func bestEval(evals []Eval) Eval {
 		log.Fatalf("len(evals) = 0")
 	}
 
-	evals = evalsWithHighestDepth(evals)
+	evals = maxDepthEvals(evals)
 	return evals[0].Clone()
 }
 
-func evalsWithHighestDepth(evals []Eval) []Eval {
+func maxDepthEvals(evals []Eval) []Eval {
 	var maxDepth int
-	var hdEvals []Eval
+	maxDepthEvals := make([]Eval, 0, 8)
 
 	// find maxDepth
 	for _, eval := range evals {
 		if eval.Depth > maxDepth {
 			maxDepth = eval.Depth
+			maxDepthEvals = maxDepthEvals[:0]
 		}
-	}
-
-	// make new list.. could do this one-shot, but mehh + memory allocation
-	for _, eval := range evals {
 		if eval.Depth == maxDepth {
-			hdEvals = append(hdEvals, eval)
+			maxDepthEvals = append(maxDepthEvals, eval)
 		}
 	}
 
-	sort.Slice(evals, func(i, j int) bool {
-		if evals[i].Depth != evals[j].Depth {
-			return evals[i].Depth < evals[j].Depth
-		}
-
+	sort.Slice(maxDepthEvals, func(i, j int) bool {
 		score1 := evals[i].Score()
 		score2 := evals[j].Score()
 
@@ -259,7 +286,7 @@ func evalsWithHighestDepth(evals []Eval) []Eval {
 		return evals[i].UCIMove < evals[j].UCIMove
 	})
 
-	return hdEvals
+	return maxDepthEvals
 }
 
 func (a *Analyzer) getLines(ctx context.Context, ply, totalPlies int, maxTimePerPly time.Duration, allDepths bool) []Eval {
@@ -271,7 +298,7 @@ func (a *Analyzer) getLines(ctx context.Context, ply, totalPlies int, maxTimePer
 	var stopped bool
 	var printEngineOutput bool
 
-	showEngineOutputAfter := 5 * time.Second
+	showEngineOutputAfter := 20 * time.Second
 
 	timeout := time.NewTimer(maxTimePerPly)
 loop:
@@ -383,13 +410,14 @@ func New() *Analyzer {
 }
 
 type Analyzer struct {
-	logEngineMtx sync.Mutex
-	input        chan string
-	output       chan string
+	logEngineMtx     sync.Mutex
+	input            chan string
+	output           chan string
+	stockfishStarted int64
 }
 
-func (a *Analyzer) AnalyzeGame(ctx context.Context, moves []string, depth int, maxTimePerPly time.Duration) error {
-	logInfo(fmt.Sprintf("start game analysis, %d moves", len(moves)))
+func (a *Analyzer) AnalyzeGame(ctx context.Context, moves []string) error {
+	logInfo(fmt.Sprintf("start game analysis, %d moves (%d plies)", (len(moves)+1)/2, len(moves)))
 
 	// lowercase all moves
 	for i := 0; i < len(moves); i++ {
@@ -398,115 +426,19 @@ func (a *Analyzer) AnalyzeGame(ctx context.Context, moves []string, depth int, m
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+
 	wg, err := a.startStockfish(ctx)
 	if err != nil {
 		return err
 	}
 
-	var sentNewGame bool
-
-readyOKLoop:
-	for line := range a.output {
-		switch line {
-		case "uciok":
-			a.input <- fmt.Sprintf("setoption name Threads value %d", threads)
-			a.input <- fmt.Sprintf("setoption name Hash value %d", hashMemory)
-			a.input <- fmt.Sprintf("setoption name MultiPV value %d", multiPV)
-			a.input <- fmt.Sprintf("setoption name SyzygyPath value %s", SyzygyPath)
-			a.input <- fmt.Sprintf("setoption name UCI_AnalyseMode value true")
-			/*
-				setoption name Threads value 8
-				setoption name Hash value 14336
-				isready
-				setoption name SyzygyPath value /data/syz/345:/data/syz/dtz6:/data/syz/wdl6
-				setoption name UCI_AnalyseMode value true
-				setoption name MultiPV value 12
-				ucinewgame
-				isready
-				ucinewgame
-				position fen
-				go depth 32
-			*/
-
-			// setoption name Threads value 26
-			// setoption name Hash value 90000
-			// isready
-
-			// uci
-			// setoption name Threads value 24
-			// setoption name Hash value 49152
-			// setoption name SyzygyPath value /home/jud/projects/tablebases/3-4-5:/home/jud/projects/tablebases/wdl6:/home/jud/projects/tablebases/dtz6
-			// setoption name SyzygyPath value /data/syz/345:/data/syz/dtz6:/data/syz/wdl6
-			// setoption name UCI_AnalyseMode value true
-			// setoption name MultiPV value 12
-			// isready
-			// ucinewgame
-			// position fen XXXX
-			// go infinite
-			// stop
-			// isready
-			// go infinite searchmoves c5d4 f8e7 c6d4 d8c7 b7b5 g7g6 b7b6stop
-			// go infinite searchmoves b7b5 c5d4 g7g6 f8e7 d8c7
-			// go depth 45 searchmoves b7b5 c5d4 g7g6 d8c7
-			// d8b6 - clear loser (Qb6)
-			// setoption name MultiPV value 3
-			// go depth 50 searchmoves b7b5 c5d4 d8c7
-			/*
-				fo depth 34 seldepth 48 multipv 1 score cp -17 nodes 3221860987 nps 18742864 hashfull 422 tbhits 31 time 171898 pv b7b5 a2a3 d8b6 c3a2 f7f6 e3f2 c5d4 e5f6 d7f6 a2b4 c6b4 f2d4 f8c5 a3b4 c5b4 c2c3 b4c5 b2b4 c5d4 d1d4 b6d4 f3d4 c8d7 e2f3 e8e7 e1d2 e7d6 h2h4 h7h6 h4h5 h8e8 a1a5 e6e5 f4e5 d6e5 h1a1 f6e4 f3e4 d5e4 a5a6 a8a6 a1a6
-				info depth 34 seldepth 44 multipv 2 score cp -25 nodes 3221860987 nps 18742864 hashfull 422 tbhits 31 time 171898 pv g7g6 h2h4 h7h5 h1h3 c5d4 f3d4 f8e7 d1d2 e7h4 e1f1 h4e7 g2g4 h5h4 g4g5 c6d4 e3d4 b7b5 e2d3 e7c5 c3e2 d8b6 d2e3 b5b4 f1g2 a6a5 a1h1 c8a6 h3h4 h8h4 h1h4 e8e7 d3a6 c5d4 e2d4 b6a6 a2a3 a6b6 a3b4 a5b4 h4h7
-				info depth 34 seldepth 47 multipv 3 score cp -28 nodes 3221860987 nps 18742864 hashfull 422 tbhits 31 time 171898 pv c5d4 f3d4 f8c5 h2h4 h8f8 d1d2 c6d4 e3d4 c5d4 d2d4 f7f6 e1d2 d8b6 d4b6 d7b6 e5f6 g7f6 a1g1 e6e5 g2g4 e8e7 g4g5 c8f5 g5f6 e7f6 f4e5 f6e6 e2d3 b6c4 d2c1 a8c8 g1g3 c4e5 h1e1 e6d6 d3f5 f8f5
-				info depth 34 seldepth 49 multipv 4 score cp -29 nodes 3221860987 nps 18742864 hashfull 422 tbhits 31 time 171898 pv d8c7 d1d2 c5d4 f3d4 h7h5 h2h4 d7b6 b2b3 c8d7 e2d3 c6d4 e3d4 b6c8 a2a3 f8c5 d4c5 c7c5 a3a4 c8e7 c3e2 e8f8 b3b4 c5c7 c2c3 g7g6 e1f2 a8c8 h1c1 f8g7 e2d4 e7g8 a4a5 c7d8 g2g3 g8h6 f2g1 h6f5
-				info depth 33 seldepth 38 multipv 5 score cp -44 nodes 3221860987 nps 18742864 hashfull 422 tbhits 31 time 171898 pv b7b6 d1d2 c8b7 c3d1 c5d4 f3d4 c6a5 b2b3 d8c7 c2c3 f8e7 a1c1 a8c8 h2h4 h7h5 d1f2 a5c6 d2d1 g7g6 e1f1 e7a3 c1c2 c6d4 e3d4 d7b8 g2g4 b8c6 e2d3 c6d4 c3d4 c7d8 f1g2 c8c2 d1c2 a3e7 g4g5 e7b4
-				info depth 33 seldepth 44 multipv 6 score cp -51 nodes 3221860987 nps 18742864 hashfull 422 tbhits 31 time 171898 pv f8e7 a2a3 d8c7 d4c5 e7c5 e3c5 d7c5 d1d2 c5d7 e2d3 f7f6 e5f6 d7f6 e1d1 h8f8 h1e1 e8f7 b2b3 c8d7 d1c1 f7g8 g2g3 a8c8 c1b2 b7b5 c3a2 a6a5 a2c3 b5b4 c3b5 b4a3 a1a3 c7b8 f3d4 c6d4 b5d4 b8b6 d4f3 a5a4
-				info depth 34 currmove b7b6 cu
-			*/
-
-			// go infinite searchmoves c5d4 b7b5 f8e7
-			a.input <- "isready"
-		case "readyok":
-			if sentNewGame {
-				break readyOKLoop
-			}
-			sentNewGame = true
-			a.input <- "ucinewgame"
-			a.input <- "isready"
-		}
-	}
-
-	sf := make(chan []Eval)
-
-	var curPly int64
-
-	go func() {
-		totalPlies := len(moves)
-		for {
-			ply := int(atomic.LoadInt64(&curPly))
-			evals := a.getLines(ctx, ply, totalPlies, maxTimePerPly, true)
-			select {
-			case <-ctx.Done():
-				logInfo("debug: getLines loop exited")
-				return
-			default:
-			}
-			sf <- evals
-		}
-	}()
-
 	var movesEval Moves
 
-	logInfo(fmt.Sprintf("depth = %d", depth))
-
-	//for i := 0; i < len(moves); i++ {
+gameMovesLoop:
 	for i := len(moves) - 1; i >= 0; i-- {
-		atomic.StoreInt64(&curPly, int64(i))
-
 		playerMoveUCI := moves[i]
-		var povMultiplier int
-		if i%2 == 0 {
-			povMultiplier = 1
-		} else {
-			povMultiplier = -1
-		}
+
+		player := plyToColor(i)
 
 		beforeMoves := moves[0:i]
 
@@ -530,105 +462,71 @@ readyOKLoop:
 		if len(movesEval) > 0 {
 			startFEN := board.Clone().Moves(playerMoveUCI).FEN()
 
-			pgn := evalToPGN(startFEN, depth, movesEval, false)
+			pgn := evalToPGN(startFEN, 0, movesEval, false)
 			logMultiline(pgn)
+			if err := ioutil.WriteFile("eval.pgn", []byte(pgn), 0644); err != nil {
+				log.Fatal(err)
+			}
 
 			tbl := debugEvalTable(startFEN, movesEval)
 			logMultiline(tbl)
-
-			/*bookMoves := createOpeningBook(startFEN, movesEval)
-			if err := saveBookMoves(bookMoves); err != nil {
-				log.Fatal(err)
-			}*/
 		}
 
-		// TODO: check if player's move was in initial multipv/depth check
+		evals, err := a.AnalyzePosition(ctx, board.FEN(), len(moves)-1-i, len(moves), playerMoveUCI)
+		if err != nil {
+			return err
+		}
 
-		m := strings.Join(beforeMoves, " ")
-		a.input <- fmt.Sprintf("position fen %s moves %s", startPosFEN, m)
-		a.input <- fmt.Sprintf("go depth %d", depth)
+		select {
+		case <-ctx.Done():
+			break gameMovesLoop
+		default:
+		}
 
-	loop:
-		for {
-			select {
-			case evals := <-sf:
-				if len(evals) == 0 {
-					break loop
-				}
+		evals = maxDepthEvals(evals)
+		bestMove := bestEval(evals)
 
-				evals = evalsWithHighestDepth(evals)
-				bestMove := bestEval(evals)
+		for _, eval := range evals {
+			logInfo(fmt.Sprintf("depth=%d move=%s pov_cp=%d", eval.Depth, eval.UCIMove, eval.POVCP(player)))
+		}
 
-				for _, eval := range evals {
-					logInfo(fmt.Sprintf("depth=%d move=%s cp=%d", eval.Depth, eval.UCIMove, eval.CP))
-				}
+		newMove := Move{
+			Ply:    i,
+			UCI:    playerMoveUCI,
+			SAN:    sanMove,
+			IsMate: board.IsMate(),
+		}
 
-				newMove := Move{
-					Ply:    i,
-					UCI:    playerMoveUCI,
-					SAN:    sanMove,
-					IsMate: board.IsMate(),
-				}
-
-				var playerMove Eval
-				for _, checkMove := range evals {
-					if checkMove.UCIMove == playerMoveUCI {
-						playerMove = checkMove.Clone()
-						break
-					}
-				}
-
-				// not the best move, eval player's move
-				if playerMove.UCIMove == "" {
-					a.input <- fmt.Sprintf("go depth %d searchmoves %s", depth, playerMoveUCI)
-
-					evals := <-sf
-
-					highestDepth := evalsWithHighestDepth(evals)
-
-					bestMove = bestEval(highestDepth)
-
-					for i := 0; i < len(highestDepth); i++ {
-						e := highestDepth[i].Clone()
-						if e.UCIMove == playerMoveUCI {
-							playerMove = e
-							break
-						}
-					}
-				}
-
-				if playerMove.Score() >= bestMove.Score() {
-					bestMove = playerMove.Clone()
-				}
-
-				playerMove.CP *= povMultiplier
-				playerMove.Mate *= povMultiplier
-
-				bestMove.CP *= povMultiplier
-				bestMove.Mate *= povMultiplier
-
-				// set played move + best move eval
-
-				newMove.Eval = playerMove
-				newMove.BestMove = bestMove
-
-				// show output
-
-				movesEval = append(movesEval, newMove)
-
-				bestMoveSAN := board.UCItoSAN(bestMove.UCIMove)
-				logInfo(fmt.Sprintf("%3d/%3d %3d. %-7s played_cp: %6d played_mate: %2d top_move: %-7s top_cp: %6d top_mate: %2d",
-					i+1, len(moves), (i+2)/2, sanMove, playerMove.CP, playerMove.Mate, bestMoveSAN, bestMove.CP, bestMove.Mate))
-
-				break loop
-
-			case <-ctx.Done():
-				return nil
+		var playerMove Eval
+		for _, checkMove := range evals {
+			if checkMove.UCIMove == playerMoveUCI {
+				playerMove = checkMove.Clone()
+				break
 			}
 		}
+
+		if playerMove.Score() >= bestMove.Score() {
+			bestMove = playerMove.Clone()
+		}
+
+		// set played move + best move eval
+
+		newMove.Eval = playerMove
+		newMove.BestMove = bestMove
+
+		// show output
+
+		movesEval = append(movesEval, newMove)
+
+		bestMoveSAN := board.UCItoSAN(bestMove.UCIMove)
+		logInfo(fmt.Sprintf("%3d/%3d %3d. %-7s played_cp: %6d played_mate: %2d top_move: %-7s top_cp: %6d top_mate: %2d",
+			i+1, len(moves), (i+2)/2,
+			sanMove, playerMove.POVCP(player), playerMove.POVMate(player),
+			bestMoveSAN, bestMove.POVCP(player), bestMove.POVMate(player),
+		))
 	}
 
-	pgn := evalToPGN(startPosFEN, depth, movesEval, true)
+	pgn := evalToPGN(startPosFEN, 0, movesEval, true)
 	logMultiline(pgn)
 
 	tbl := debugEvalTable(startPosFEN, movesEval)
@@ -639,108 +537,85 @@ readyOKLoop:
 		log.Fatal(err)
 	}
 
-	a.input <- "quit"
+	if wg != nil {
+		a.input <- "quit"
 
-	cancel()
-	wg.Wait()
+		cancel()
+		wg.Wait()
+	}
 
 	return nil
 }
 
-func (a *Analyzer) AnalyzePosition(ctx context.Context, fenPos string) error {
+func (a *Analyzer) AnalyzePosition(ctx context.Context, fenPos string, ply, totalPlies int, playerMoveUCI string) ([]Eval, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+
 	wg, err := a.startStockfish(ctx)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	var sentNewGame bool
-	var playerNumber int
-
-	_ = playerNumber
-
-	board := fen.FENtoBoard(fenPos)
-	if board.ActiveColor == "w" {
-		playerNumber = 0
-	} else {
-		playerNumber = 1
-	}
-
-readyOKLoop:
-	for line := range a.output {
-		switch line {
-		case "uciok":
-			a.input <- fmt.Sprintf("setoption name Threads value %d", threads)
-			a.input <- fmt.Sprintf("setoption name Hash value %d", hashMemory)
-			a.input <- fmt.Sprintf("setoption name MultiPV value %d", multiPV)
-			a.input <- fmt.Sprintf("setoption name SyzygyPath value %s", SyzygyPath)
-			a.input <- fmt.Sprintf("setoption name UCI_AnalyseMode value true")
-			a.input <- "isready"
-		case "readyok":
-			if sentNewGame {
-				break readyOKLoop
-			}
-			sentNewGame = true
-			a.input <- "ucinewgame"
-			a.input <- "isready"
-		}
-	}
-
+	a.waitReady()
 	a.input <- fmt.Sprintf("position fen %s", fenPos)
 
-	var searchMoves string
+	var searchMoves []string
+	var evals Evals
 
-	for i := 0; i < 3; i++ {
-		var (
-			depth      int
-			maxTime    time.Duration
-			maxSurvive int
-		)
+	evalTiers := DefaultEvalTiers
+	for i := 0; i < len(evalTiers); i++ {
+		tier := evalTiers[i]
 
-		switch i {
-		case 0:
-			depth = tier1Depth
-			maxTime = tier1MaxTime
-			maxSurvive = tier1MaxSurvivors
-		case 1:
-			depth = tier2Depth
-			maxTime = tier2MaxTime
-			maxSurvive = tier2MaxSurvivors
-		case 2:
-			depth = tier3Depth
-			maxTime = tier3MaxTime
-		}
-
-		logInfo(fmt.Sprintf("start depth=%d searchmoves %s fen %s", depth, searchMoves, fenPos))
-
-		evals, err := a.analyzePosition(ctx, fenPos, depth, searchMoves, maxTime)
-		if err != nil {
-			return fmt.Errorf("searchmoves '%s': %v", searchMoves, err)
-		}
-
-		searchMoves = ""
-
-		if len(evals) > maxSurvive {
-			evals = evals[:maxSurvive]
-		}
-		for _, eval := range evals {
-			if searchMoves != "" {
-				searchMoves += " "
+		if i != 0 && i != len(evalTiers)-1 {
+			if len(evals) <= tier.MaxSurvivors {
+				logInfo(fmt.Sprintf("skipping tier %d! %d survivors", i+1, len(evals)))
+				i++
+				continue
 			}
-			searchMoves += eval.UCIMove
 		}
 
-		logInfo(fmt.Sprintf("new searchMoves: '%s'", searchMoves))
+		logInfo(fmt.Sprintf("start depth=%d searchmoves %v fen %s", tier.Depth, searchMoves, fenPos))
+
+		evals, err = a.analyzePosition(ctx, fenPos, ply, totalPlies, tier.Depth, searchMoves, tier.MaxTime, tier.SurvivorThreshold)
+		if err != nil {
+			return nil, fmt.Errorf("searchmoves '%v': %v", searchMoves, err)
+		}
+
+		playerMoveEval, found := evals.Get(playerMoveUCI)
+		if !found && playerMoveUCI != "" {
+			log.Fatalf("TODO: player's move %s not found in eval list: %v", playerMoveUCI, evals)
+		}
+
+		if len(evals) > tier.MaxSurvivors && tier.MaxSurvivors > 0 {
+			evals = evals[:tier.MaxSurvivors]
+
+			// add player move if it didn't make the cut
+			if !playerMoveEval.Empty() {
+				_, found = evals.Get(playerMoveUCI)
+				if !found {
+					evals[len(evals)-1] = playerMoveEval
+					evals = maxDepthEvals(evals) // re-sorts
+				}
+			}
+		}
+
+		searchMoves = searchMoves[:0]
+		for _, eval := range evals {
+			searchMoves = append(searchMoves, eval.UCIMove)
+		}
+
+		logInfo(fmt.Sprintf("new searchMoves: %v", searchMoves))
 	}
 
-	logInfo("sending quit")
-	a.input <- "quit"
+	if wg != nil {
+		logInfo("sending quit")
+		a.input <- "quit"
 
-	cancel()
-	wg.Wait()
+		cancel()
+		wg.Wait()
+	}
 
-	return nil
+	return evals, nil
 }
 
 func (a *Analyzer) waitReady() {
@@ -752,55 +627,30 @@ func (a *Analyzer) waitReady() {
 	}
 }
 
-var timeAround = 0
-
-func (a *Analyzer) analyzePosition(ctx context.Context, fenPos string, depth int, searchMoves string, maxTime time.Duration) ([]Eval, error) {
+func (a *Analyzer) analyzePosition(ctx context.Context, fenPos string, ply, totalPlies, depth int, searchMoves []string, maxTime time.Duration, cutoff float64) ([]Eval, error) {
 	board := fen.FENtoBoard(fenPos)
-	timeAround++
 
 	if board.IsMate() {
 		return nil, fmt.Errorf("TODO: position '%s' is already game over", fenPos)
 	}
 
-	var (
-		playerNumber  int
-		povMultiplier int
-	)
-	if board.ActiveColor == "w" {
-		playerNumber = 0
-		povMultiplier = 1
-	} else if board.ActiveColor == "b" {
-		playerNumber = 1
-		povMultiplier = -1
-	} else {
-		return nil, fmt.Errorf("active color '%s'; expected w or b", board.ActiveColor)
-	}
-
-	if searchMoves == "" {
+	if len(searchMoves) == 0 {
 		a.input <- fmt.Sprintf("setoption name MultiPV value %d", multiPV)
 		a.input <- fmt.Sprintf("go depth %d", depth)
-		if timeAround > 1 {
-			log.Fatal("figure it out")
-		}
-		timeAround++
 	} else {
-		a.input <- fmt.Sprintf("setoption name MultiPV value %d", len(strings.Split(searchMoves, " ")))
-		a.input <- fmt.Sprintf("go depth %d searchmoves %s", depth, searchMoves)
+		a.input <- fmt.Sprintf("setoption name MultiPV value %d", len(searchMoves))
+		a.input <- fmt.Sprintf("go depth %d searchmoves %s", depth, strings.Join(searchMoves, " "))
 	}
 
-	evals := a.getLines(ctx, 0, 1, maxTime, true)
+	evals := a.getLines(ctx, ply, totalPlies, maxTime, true)
 	if len(evals) == 0 {
 		return nil, fmt.Errorf("no evaluations returned for fen '%s'", fenPos)
 	}
 
-	for j := 0; j < len(evals); j++ {
-		evals[j].CP *= povMultiplier
-		evals[j].Mate *= povMultiplier
-	}
-
 	curDepth := 0
 	logInfo("")
-	newestEvals := evalsWithHighestDepth(evals)
+	newestEvals := maxDepthEvals(evals)
+	player := board.ActivePlayer()
 	var bestMoveAtDepth Eval
 	for _, eval := range evals {
 		san := board.UCItoSAN(eval.UCIMove)
@@ -811,16 +661,17 @@ func (a *Analyzer) analyzePosition(ctx context.Context, fenPos string, depth int
 		} else if eval.Depth != curDepth {
 			continue
 		}
-		diff := povDiff(playerNumber, eval, bestMoveAtDepth)
+		wc := evalWinningChances(eval)
+		diff := diffWC(eval, bestMoveAtDepth)
 
 		var mark string
-		if diff < cutoff {
-			mark = "XXX"
+		if diff < cutoff && cutoff != 0 {
+			mark = fmt.Sprintf("(%.2f below wc_cutoff %.2f)", diff, cutoff)
 		} else {
 			newestEvals = append(newestEvals, eval.Clone())
 		}
 
-		logInfo(fmt.Sprintf("depth: %d move: %-7s %s cp: %4d wc-diff: %6.2f %s", eval.Depth, san, eval.UCIMove, eval.CP, diff, mark))
+		logInfo(fmt.Sprintf("depth: %d move: %-7s %s cp: %6d mate: %3d wc: %6.2f wc_diff: %6.2f %s", eval.Depth, san, eval.UCIMove, eval.POVCP(player), eval.POVMate(player), wc, diff, mark))
 	}
 	logInfo("")
 
@@ -828,12 +679,13 @@ func (a *Analyzer) analyzePosition(ctx context.Context, fenPos string, depth int
 
 	for _, eval := range newestEvals {
 		san := board.UCItoSAN(eval.UCIMove)
-		diff := povDiff(playerNumber, eval, bestMove)
-		logInfo(fmt.Sprintf("*** depth: %d move: %-7s %s cp: %4d wc-diff: %0.2f", eval.Depth, san, eval.UCIMove, eval.CP, diff))
+		diff := diffWC(eval, bestMove)
+		logInfo(fmt.Sprintf("*** depth: %d move: %-7s %s cp: %6d mate: %3d wc-diff: %0.2f", eval.Depth, san, eval.UCIMove, eval.POVCP(player), eval.POVMate(player), diff))
 	}
 
-	logInfo(fmt.Sprintf("%3d/%3d %3d. top_move: %-7s top_cp: %6d top_mate: %2d",
-		1, 1, 1, board.UCItoSAN(bestMove.UCIMove), bestMove.CP, bestMove.Mate))
+	logInfo("")
+	logInfo(fmt.Sprintf("%3d/%3d %3d. top_move: %-7s top_cp: %6d top_mate: %3d",
+		1, 1, 1, board.UCItoSAN(bestMove.UCIMove), bestMove.POVCP(player), bestMove.POVMate(player)))
 
 	return newestEvals, nil
 }
@@ -854,10 +706,10 @@ func debugEvalTable(startFEN string, movesEval Moves) string {
 	}
 
 	for _, move := range movesEval {
-		playerNumber := move.Ply % 2
+		color := plyToColor(move.Ply)
 
 		moveNumber := (move.Ply / 2) + 1
-		if playerNumber == 0 {
+		if color == fen.WhitePieces {
 			if moveNumber != firstMoveNumber {
 				sb.WriteString(fmt.Sprintf("%3d. ", moveNumber))
 			}
@@ -870,7 +722,7 @@ func debugEvalTable(startFEN string, movesEval Moves) string {
 
 		var annotation string
 		if !move.IsMate {
-			diff := povDiff(playerNumber, e2, e1)
+			diff := diffWC(e2, e1)
 			if diff <= -0.3 {
 				annotation = "??" // $4
 			} else if diff <= -0.2 {
@@ -880,18 +732,18 @@ func debugEvalTable(startFEN string, movesEval Moves) string {
 			}
 		}
 
-		sb.WriteString(fmt.Sprintf("%-7s%-2s %7s", move.SAN, annotation, move.Eval.String()))
+		sb.WriteString(fmt.Sprintf("%-7s%-2s %7s", move.SAN, annotation, move.Eval.String(color)))
 
 		if move.UCI != move.BestMove.UCIMove {
 			bestMoveSAN := board.UCItoSAN(move.BestMove.UCIMove)
-			sb.WriteString(fmt.Sprintf(" / top: %-7s %7s", bestMoveSAN, move.BestMove.String()))
+			sb.WriteString(fmt.Sprintf(" / top: %-7s %7s", bestMoveSAN, move.BestMove.String(color)))
 		} else {
 			sb.WriteString(fmt.Sprintf("        %-7s %7s", "", ""))
 		}
 
 		board.Moves(move.UCI)
 
-		if playerNumber == 1 {
+		if color == fen.BlackPieces {
 			sb.WriteString("\n")
 		}
 	}
@@ -923,18 +775,20 @@ func evalToPGN(startFEN string, depth int, movesEval Moves, header bool) string 
 	}
 
 	sb.WriteString(fmt.Sprintf("[Annotator \"Stockfish 15\"]\n"))
-	sb.WriteString(fmt.Sprintf("[Depth \"%d\"]\n", depth))
+	if depth != 0 {
+		sb.WriteString(fmt.Sprintf("[Depth \"%d\"]\n", depth))
+	}
 	sb.WriteString("\n")
 
 	board := fen.FENtoBoard(startFEN)
 	prevEval := "0.24"
 	finalResult := "*"
 	for _, move := range movesEval {
-		playerNumber := move.Ply % 2
-
 		moveNumber := (move.Ply / 2) + 1
+		color := plyToColor(move.Ply)
+
 		var englishColor string
-		if playerNumber == 0 {
+		if color == fen.WhitePieces {
 			sb.WriteString(fmt.Sprintf("%d. ", moveNumber))
 			englishColor = "White"
 		} else {
@@ -942,8 +796,8 @@ func evalToPGN(startFEN string, depth int, movesEval Moves, header bool) string 
 			englishColor = "Black"
 		}
 
-		e1 := move.BestMove
-		e2 := move.Eval
+		bestMove := move.BestMove
+		playedMove := move.Eval
 
 		// $1 = !  (good move)
 		// $2 = ?  (poor move, mistake)
@@ -952,13 +806,13 @@ func evalToPGN(startFEN string, depth int, movesEval Moves, header bool) string 
 		var annotation, annotationWord string
 		var showVariations bool
 		if !move.IsMate {
-			diff := povDiff(playerNumber, e2, e1)
+			diff := diffWC(playedMove, bestMove)
 			if diff <= -0.3 {
 				annotation = "??" // $4
 				annotationWord = "Blunder"
-				if e1.Mate != 0 && e2.Mate == 0 {
+				if bestMove.Mate > 0 && playedMove.Mate <= 0 {
 					annotationWord = "Lost forced checkmate sequence"
-				} else if e1.Mate == 0 && e2.Mate != 0 {
+				} else if bestMove.Mate == 0 && playedMove.Mate < 0 {
 					annotationWord = "Checkmate is now unavoidable"
 				}
 			} else if diff <= -0.2 {
@@ -981,7 +835,7 @@ func evalToPGN(startFEN string, depth int, movesEval Moves, header bool) string 
 				prevEval = "Mate in " + mate
 			}
 
-			curEval := move.Eval.String()
+			curEval := move.Eval.String(color)
 			if strings.HasPrefix(curEval, "#") {
 				mate := strings.TrimLeft(curEval, "#-")
 				curEval = "Mate in " + mate
@@ -992,23 +846,23 @@ func evalToPGN(startFEN string, depth int, movesEval Moves, header bool) string 
 
 		if move.Eval.Mated {
 			sb.WriteString(fmt.Sprintf("    { Checkmate. %s is victorious. }\n", englishColor))
-			if playerNumber == 0 {
+			if color == fen.WhitePieces {
 				finalResult = "1-0"
 			} else {
 				finalResult = "0-1"
 			}
 		} else {
-			sb.WriteString(fmt.Sprintf("    { [%%eval %s] }\n", move.Eval.String()))
+			sb.WriteString(fmt.Sprintf("    { [%%eval %s] }\n", move.Eval.String(color)))
 		}
 
 		if showVariations {
 			//fmt.Printf("board.FullMove: %s\n", board.FullMove)
-			writeVariation(&sb, board.Clone(), e1, "")
-			writeVariation(&sb, board.Clone(), e2, annotation)
+			writeVariation(&sb, board.Clone(), bestMove, "")
+			writeVariation(&sb, board.Clone(), playedMove, annotation)
 		}
 		board.Moves(move.UCI)
 
-		prevEval = move.Eval.String()
+		prevEval = move.Eval.String(color)
 	}
 	sb.WriteString(fmt.Sprintf("%s\n", finalResult)) // TODO: lazy, make this 1-0, 0-1, 1/2-1/2, or *
 
@@ -1023,11 +877,9 @@ func writeVariation(sb *strings.Builder, board *fen.Board, eval Eval, annotation
 	used := 6
 
 	basePly := (atoi(board.FullMove) - 1) * 2
-	if board.ActiveColor == "b" {
+	if board.ActivePlayer() == fen.BlackPieces {
 		basePly++
 	}
-
-	//fmt.Printf("variation base_ply: %d\n", basePly)
 
 	for j := 0; j < len(eval.PV); j++ {
 		uci := eval.PV[j]
@@ -1036,17 +888,16 @@ func writeVariation(sb *strings.Builder, board *fen.Board, eval Eval, annotation
 		ply := basePly + j
 		moveNumber := (ply + 2) / 2
 
-		//fmt.Printf("variation ply: %d\n", ply)
-		//fmt.Printf("variation fullmove: %d\n", moveNumber)
+		color := plyToColor(ply)
 
 		if j == 0 {
 			sb.WriteString(fmt.Sprintf("%d. ", moveNumber))
 			used += 5
-			if ply%2 == 1 {
+			if color == fen.BlackPieces {
 				sb.WriteString("... ")
 				used += 4
 			}
-		} else if ply%2 == 0 {
+		} else if color == fen.WhitePieces {
 			sb.WriteString(fmt.Sprintf("%d. ", moveNumber))
 			used += 5
 		}
@@ -1060,7 +911,7 @@ func writeVariation(sb *strings.Builder, board *fen.Board, eval Eval, annotation
 		}
 
 		if j == 0 {
-			variationEval := fmt.Sprintf("{ [%%eval %s] } ", eval.String())
+			variationEval := fmt.Sprintf("{ [%%eval %s] } ", eval.String(color))
 			sb.WriteString(variationEval)
 			used += len(variationEval)
 		}
@@ -1076,15 +927,16 @@ func writeVariation(sb *strings.Builder, board *fen.Board, eval Eval, annotation
 }
 
 func (a *Analyzer) startStockfish(ctx context.Context) (*sync.WaitGroup, error) {
-	binary := "/home/jud/projects/trollfish/stockfish/stockfish"
-	dir := "/home/jud/projects/trollfish/stockfish"
+	if !atomic.CompareAndSwapInt64(&a.stockfishStarted, 0, 1) {
+		return nil, nil
+	}
 
-	cmd := exec.CommandContext(ctx, binary)
-	cmd.Dir = dir
+	cmd := exec.CommandContext(ctx, stockfishBinary)
+	cmd.Dir = stockfishDir
 
 	var wg sync.WaitGroup
 
-	var readyok int64 = 1
+	var readyOK int64 = 1
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -1111,7 +963,7 @@ func (a *Analyzer) startStockfish(ctx context.Context) (*sync.WaitGroup, error) 
 		for {
 			select {
 			case line := <-a.input:
-				for atomic.LoadInt64(&readyok) == 0 {
+				for atomic.LoadInt64(&readyOK) == 0 {
 					time.Sleep(10 * time.Millisecond)
 				}
 
@@ -1119,7 +971,7 @@ func (a *Analyzer) startStockfish(ctx context.Context) (*sync.WaitGroup, error) 
 
 				if line == "isready" {
 					logInfo("-> isready")
-					atomic.StoreInt64(&readyok, 0)
+					atomic.StoreInt64(&readyOK, 0)
 				}
 
 				_, err := stdin.Write([]byte(fmt.Sprintf("%s\n", line)))
@@ -1183,7 +1035,7 @@ func (a *Analyzer) startStockfish(ctx context.Context) (*sync.WaitGroup, error) 
 
 			if line == "readyok" {
 				logInfo("<- readyok")
-				atomic.StoreInt64(&readyok, 1)
+				atomic.StoreInt64(&readyOK, 1)
 			}
 		}
 		if err := r.Err(); err != nil {
@@ -1201,6 +1053,83 @@ func (a *Analyzer) startStockfish(ctx context.Context) (*sync.WaitGroup, error) 
 			}
 		}
 	}()
+
+	// initialize parameters
+
+	var sentNewGame bool
+
+readyOKLoop:
+	for line := range a.output {
+		switch line {
+		case "uciok":
+			a.input <- fmt.Sprintf("setoption name Threads value %d", threads)
+			a.input <- fmt.Sprintf("setoption name Hash value %d", hashMemory)
+			a.input <- fmt.Sprintf("setoption name MultiPV value %d", multiPV)
+			a.input <- fmt.Sprintf("setoption name SyzygyPath value %s", SyzygyPath)
+			a.input <- fmt.Sprintf("setoption name UCI_AnalyseMode value true")
+			/*
+				setoption name Threads value 8
+				setoption name Hash value 14336
+				isready
+				setoption name SyzygyPath value /data/syz/345:/data/syz/dtz6:/data/syz/wdl6
+				setoption name UCI_AnalyseMode value true
+				setoption name MultiPV value 12
+				ucinewgame
+				isready
+				ucinewgame
+				position fen
+				go depth 32
+			*/
+
+			// setoption name Threads value 26
+			// setoption name Hash value 90000
+			// isready
+
+			//
+			/*
+
+			 */
+
+			// uci
+			// setoption name Threads value 24
+			// setoption name Hash value 49152
+			// setoption name SyzygyPath value /home/jud/projects/tablebases/3-4-5:/home/jud/projects/tablebases/wdl6:/home/jud/projects/tablebases/dtz6
+			// setoption name SyzygyPath value /data/syz/345:/data/syz/dtz6:/data/syz/wdl6
+			// setoption name UCI_AnalyseMode value true
+			// setoption name MultiPV value 12
+			// isready
+			// ucinewgame
+			// position fen XXXX
+			// go infinite
+			// stop
+			// isready
+			// go infinite searchmoves c5d4 f8e7 c6d4 d8c7 b7b5 g7g6 b7b6stop
+			// go infinite searchmoves b7b5 c5d4 g7g6 f8e7 d8c7
+			// go depth 45 searchmoves b7b5 c5d4 g7g6 d8c7
+			// d8b6 - clear loser (Qb6)
+			// setoption name MultiPV value 3
+			// go depth 50 searchmoves b7b5 c5d4 d8c7
+			/*
+				fo depth 34 seldepth 48 multipv 1 score cp -17 nodes 3221860987 nps 18742864 hashfull 422 tbhits 31 time 171898 pv b7b5 a2a3 d8b6 c3a2 f7f6 e3f2 c5d4 e5f6 d7f6 a2b4 c6b4 f2d4 f8c5 a3b4 c5b4 c2c3 b4c5 b2b4 c5d4 d1d4 b6d4 f3d4 c8d7 e2f3 e8e7 e1d2 e7d6 h2h4 h7h6 h4h5 h8e8 a1a5 e6e5 f4e5 d6e5 h1a1 f6e4 f3e4 d5e4 a5a6 a8a6 a1a6
+				info depth 34 seldepth 44 multipv 2 score cp -25 nodes 3221860987 nps 18742864 hashfull 422 tbhits 31 time 171898 pv g7g6 h2h4 h7h5 h1h3 c5d4 f3d4 f8e7 d1d2 e7h4 e1f1 h4e7 g2g4 h5h4 g4g5 c6d4 e3d4 b7b5 e2d3 e7c5 c3e2 d8b6 d2e3 b5b4 f1g2 a6a5 a1h1 c8a6 h3h4 h8h4 h1h4 e8e7 d3a6 c5d4 e2d4 b6a6 a2a3 a6b6 a3b4 a5b4 h4h7
+				info depth 34 seldepth 47 multipv 3 score cp -28 nodes 3221860987 nps 18742864 hashfull 422 tbhits 31 time 171898 pv c5d4 f3d4 f8c5 h2h4 h8f8 d1d2 c6d4 e3d4 c5d4 d2d4 f7f6 e1d2 d8b6 d4b6 d7b6 e5f6 g7f6 a1g1 e6e5 g2g4 e8e7 g4g5 c8f5 g5f6 e7f6 f4e5 f6e6 e2d3 b6c4 d2c1 a8c8 g1g3 c4e5 h1e1 e6d6 d3f5 f8f5
+				info depth 34 seldepth 49 multipv 4 score cp -29 nodes 3221860987 nps 18742864 hashfull 422 tbhits 31 time 171898 pv d8c7 d1d2 c5d4 f3d4 h7h5 h2h4 d7b6 b2b3 c8d7 e2d3 c6d4 e3d4 b6c8 a2a3 f8c5 d4c5 c7c5 a3a4 c8e7 c3e2 e8f8 b3b4 c5c7 c2c3 g7g6 e1f2 a8c8 h1c1 f8g7 e2d4 e7g8 a4a5 c7d8 g2g3 g8h6 f2g1 h6f5
+				info depth 33 seldepth 38 multipv 5 score cp -44 nodes 3221860987 nps 18742864 hashfull 422 tbhits 31 time 171898 pv b7b6 d1d2 c8b7 c3d1 c5d4 f3d4 c6a5 b2b3 d8c7 c2c3 f8e7 a1c1 a8c8 h2h4 h7h5 d1f2 a5c6 d2d1 g7g6 e1f1 e7a3 c1c2 c6d4 e3d4 d7b8 g2g4 b8c6 e2d3 c6d4 c3d4 c7d8 f1g2 c8c2 d1c2 a3e7 g4g5 e7b4
+				info depth 33 seldepth 44 multipv 6 score cp -51 nodes 3221860987 nps 18742864 hashfull 422 tbhits 31 time 171898 pv f8e7 a2a3 d8c7 d4c5 e7c5 e3c5 d7c5 d1d2 c5d7 e2d3 f7f6 e5f6 d7f6 e1d1 h8f8 h1e1 e8f7 b2b3 c8d7 d1c1 f7g8 g2g3 a8c8 c1b2 b7b5 c3a2 a6a5 a2c3 b5b4 c3b5 b4a3 a1a3 c7b8 f3d4 c6d4 b5d4 b8b6 d4f3 a5a4
+				info depth 34 currmove b7b6 cu
+			*/
+
+			// go infinite searchmoves c5d4 b7b5 f8e7
+			a.input <- "isready"
+		case "readyok":
+			if sentNewGame {
+				break readyOKLoop
+			}
+			sentNewGame = true
+			a.input <- "ucinewgame"
+			a.input <- "isready"
+		}
+	}
 
 	return &wg, nil
 }
@@ -1244,4 +1173,11 @@ func (a *Analyzer) LogEngine(s string) {
 	a.logEngineMtx.Lock()
 	_, _ = fmt.Fprintln(os.Stdout, s)
 	a.logEngineMtx.Unlock()
+}
+
+func plyToColor(ply int) fen.Color {
+	if ply%2 == 0 {
+		return fen.WhitePieces
+	}
+	return fen.BlackPieces
 }

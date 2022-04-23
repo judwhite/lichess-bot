@@ -26,7 +26,7 @@ func evalWinningChances(eval Eval) float64 {
 	return cpWinningChances(eval.CP)
 }
 
-// povChances computes winning chances for a color
+/*// povChances computes winning chances for a color
 // 1  infinitely winning
 // -1 infinitely losing
 func povChances(color int, eval Eval) float64 {
@@ -44,4 +44,11 @@ func povChances(color int, eval Eval) float64 {
 // -1 = e1 is infinitely worse  than e2
 func povDiff(color int, e2 Eval, e1 Eval) float64 {
 	return povChances(color, e2) - povChances(color, e1)
+}*/
+
+// diffWC computes the difference, in winning chances, between two evaluations
+// 1  = e1 is infinitely better than e2
+// -1 = e1 is infinitely worse  than e2
+func diffWC(e2 Eval, e1 Eval) float64 {
+	return evalWinningChances(e2) - evalWinningChances(e1)
 }
