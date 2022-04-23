@@ -8,6 +8,7 @@ import (
 	"io/ioutil"
 	"log"
 	"math"
+	"os"
 	"os/exec"
 	"sort"
 	"strconv"
@@ -15,22 +16,32 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
 	"trollfish-lichess/fen"
 )
 
+const SyzygyPath = "/home/jud/projects/tablebases/3-4-5:/home/jud/projects/tablebases/wdl6:/home/jud/projects/tablebases/dtz6" // TODO: get path from config file
+
 const startPosFEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
 const threads = 24
-const threadsHashMultiplier = 2048
+
+const threadsHashMultiplier = 2048 // 24*2048 = 49152
+const hashMemory = threads * threadsHashMultiplier
+
+//const hashMemory = 95_000
+const multiPV = 12
 
 const Engine_Stockfish_15_NN_6e0680e = 1
+
+const depthTier1 = 18
+const depthTier2 = 31
+const depthTier3 = 41
+const cutoff = -0.12
 
 // id: 1
 // sfid = "sf15"
 // sfcommit = "6e0680e"
 // sfnn = "d0b74ce1e5eb"
-
-// TODO: get path from config file
-const syzygyPath = "/home/jud/projects/tablebase/3-4-5"
 
 type Moves []Move
 
@@ -265,17 +276,27 @@ func evalsWithHighestDepth(evals []Eval) []Eval {
 		}
 	}
 
+	sort.Slice(evals, func(i, j int) bool {
+		if evals[i].Depth != evals[j].Depth {
+			return evals[i].Depth < evals[j].Depth
+		}
+		if evals[i].CP != evals[j].CP {
+			return evals[i].CP < evals[j].CP
+		}
+		return evals[i].UCIMove < evals[j].UCIMove
+	})
+
 	return hdEvals
 }
 
-func getLines(ctx context.Context, ply, totalPlies int, output <-chan string, input chan<- string, maxTimePerPly time.Duration, allDepths bool, showEngineOutputAfter time.Duration) []Eval {
+func (a *Analyzer) getLines(ctx context.Context, ply, totalPlies int, maxTimePerPly time.Duration, allDepths bool) []Eval {
 	start := time.Now()
 
 	var moves []Eval
 
 	var maxDepth int
 	var stopped bool
-	var printEngineOutput bool
+	//var printEngineOutput bool
 
 	timeout := time.NewTimer(maxTimePerPly)
 loop:
@@ -283,16 +304,19 @@ loop:
 		select {
 		case <-ctx.Done():
 			break loop
-		case line := <-output:
+		case line := <-a.output:
 			if strings.HasPrefix(line, "bestmove") {
-				input <- "stop"
+				a.input <- "stop"
 				break loop
 			}
 
-			if !printEngineOutput && time.Since(start) > showEngineOutputAfter {
+			/*if !printEngineOutput && time.Since(start) > showEngineOutputAfter {
 				printEngineOutput = true
 			}
 			if printEngineOutput {
+				logInfo(fmt.Sprintf("ply=%d/%d t=%v/%v <- %s", ply+1, totalPlies, time.Since(start).Round(time.Second), maxTimePerPly, line))
+			}*/
+			if showEngineOutput(line) {
 				logInfo(fmt.Sprintf("ply=%d/%d t=%v/%v <- %s", ply+1, totalPlies, time.Since(start).Round(time.Second), maxTimePerPly, line))
 			}
 
@@ -327,7 +351,7 @@ loop:
 				return nil
 			}
 			logInfo(fmt.Sprintf("per-move timeout expired (%v), using what we have at depth %d", maxTimePerPly, maxDepth))
-			input <- "stop"
+			a.input <- "stop"
 			stopped = true
 		}
 	}
@@ -378,41 +402,95 @@ loop:
 }
 
 func New() *Analyzer {
-	return &Analyzer{}
+	return &Analyzer{
+		input:  make(chan string, 512),
+		output: make(chan string, 512),
+	}
 }
 
 type Analyzer struct {
+	logEngineMtx sync.Mutex
+	input        chan string
+	output       chan string
 }
 
 func (a *Analyzer) AnalyzeGame(ctx context.Context, moves []string, depth int, maxTimePerPly time.Duration) error {
 	logInfo("start")
 
-	input := make(chan string, 512)
-	output := make(chan string, 512)
-
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	wg, err := startStockfish(ctx, input, output)
+	wg, err := a.startStockfish(ctx)
 	if err != nil {
 		return err
 	}
 
-	input <- "uci"
+	var sentNewGame bool
 
 readyOKLoop:
-	for line := range output {
+	for line := range a.output {
 		switch line {
 		case "uciok":
-			logInfo("uciok")
-			input <- fmt.Sprintf("setoption name Threads value %d", threads)
-			input <- fmt.Sprintf("setoption name Hash value %d", threads*threadsHashMultiplier)
-			input <- fmt.Sprintf("setoption name MultiPV value 3")
-			input <- fmt.Sprintf("setoption name SyzygyPath value %s", syzygyPath)
-			input <- fmt.Sprintf("setoption name UCI_AnalyseMode value true")
-			input <- "isready"
+			a.input <- fmt.Sprintf("setoption name Threads value %d", threads)
+			a.input <- fmt.Sprintf("setoption name Hash value %d", hashMemory)
+			a.input <- fmt.Sprintf("setoption name MultiPV value %d", multiPV)
+			a.input <- fmt.Sprintf("setoption name SyzygyPath value %s", SyzygyPath)
+			a.input <- fmt.Sprintf("setoption name UCI_AnalyseMode value true")
+			/*
+				setoption name Threads value 8
+				setoption name Hash value 14336
+				isready
+				setoption name SyzygyPath value /data/syz/345:/data/syz/dtz6:/data/syz/wdl6
+				setoption name UCI_AnalyseMode value true
+				setoption name MultiPV value 12
+				ucinewgame
+				isready
+				ucinewgame
+				position fen
+				go depth 32
+			*/
+
+			// setoption name Threads value 26
+			// setoption name Hash value 90000
+			// isready
+
+			// uci
+			// setoption name Threads value 24
+			// setoption name Hash value 49152
+			// setoption name SyzygyPath value /home/jud/projects/tablebases/3-4-5:/home/jud/projects/tablebases/wdl6:/home/jud/projects/tablebases/dtz6
+			// setoption name SyzygyPath value /data/syz/345:/data/syz/dtz6:/data/syz/wdl6
+			// setoption name UCI_AnalyseMode value true
+			// setoption name MultiPV value 12
+			// isready
+			// ucinewgame
+			// position fen XXXX
+			// go infinite
+			// stop
+			// isready
+			// go infinite searchmoves c5d4 f8e7 c6d4 d8c7 b7b5 g7g6 b7b6stop
+			// go infinite searchmoves b7b5 c5d4 g7g6 f8e7 d8c7
+			// go depth 45 searchmoves b7b5 c5d4 g7g6 d8c7
+			// d8b6 - clear loser (Qb6)
+			// setoption name MultiPV value 3
+			// go depth 50 searchmoves b7b5 c5d4 d8c7
+			/*
+				fo depth 34 seldepth 48 multipv 1 score cp -17 nodes 3221860987 nps 18742864 hashfull 422 tbhits 31 time 171898 pv b7b5 a2a3 d8b6 c3a2 f7f6 e3f2 c5d4 e5f6 d7f6 a2b4 c6b4 f2d4 f8c5 a3b4 c5b4 c2c3 b4c5 b2b4 c5d4 d1d4 b6d4 f3d4 c8d7 e2f3 e8e7 e1d2 e7d6 h2h4 h7h6 h4h5 h8e8 a1a5 e6e5 f4e5 d6e5 h1a1 f6e4 f3e4 d5e4 a5a6 a8a6 a1a6
+				info depth 34 seldepth 44 multipv 2 score cp -25 nodes 3221860987 nps 18742864 hashfull 422 tbhits 31 time 171898 pv g7g6 h2h4 h7h5 h1h3 c5d4 f3d4 f8e7 d1d2 e7h4 e1f1 h4e7 g2g4 h5h4 g4g5 c6d4 e3d4 b7b5 e2d3 e7c5 c3e2 d8b6 d2e3 b5b4 f1g2 a6a5 a1h1 c8a6 h3h4 h8h4 h1h4 e8e7 d3a6 c5d4 e2d4 b6a6 a2a3 a6b6 a3b4 a5b4 h4h7
+				info depth 34 seldepth 47 multipv 3 score cp -28 nodes 3221860987 nps 18742864 hashfull 422 tbhits 31 time 171898 pv c5d4 f3d4 f8c5 h2h4 h8f8 d1d2 c6d4 e3d4 c5d4 d2d4 f7f6 e1d2 d8b6 d4b6 d7b6 e5f6 g7f6 a1g1 e6e5 g2g4 e8e7 g4g5 c8f5 g5f6 e7f6 f4e5 f6e6 e2d3 b6c4 d2c1 a8c8 g1g3 c4e5 h1e1 e6d6 d3f5 f8f5
+				info depth 34 seldepth 49 multipv 4 score cp -29 nodes 3221860987 nps 18742864 hashfull 422 tbhits 31 time 171898 pv d8c7 d1d2 c5d4 f3d4 h7h5 h2h4 d7b6 b2b3 c8d7 e2d3 c6d4 e3d4 b6c8 a2a3 f8c5 d4c5 c7c5 a3a4 c8e7 c3e2 e8f8 b3b4 c5c7 c2c3 g7g6 e1f2 a8c8 h1c1 f8g7 e2d4 e7g8 a4a5 c7d8 g2g3 g8h6 f2g1 h6f5
+				info depth 33 seldepth 38 multipv 5 score cp -44 nodes 3221860987 nps 18742864 hashfull 422 tbhits 31 time 171898 pv b7b6 d1d2 c8b7 c3d1 c5d4 f3d4 c6a5 b2b3 d8c7 c2c3 f8e7 a1c1 a8c8 h2h4 h7h5 d1f2 a5c6 d2d1 g7g6 e1f1 e7a3 c1c2 c6d4 e3d4 d7b8 g2g4 b8c6 e2d3 c6d4 c3d4 c7d8 f1g2 c8c2 d1c2 a3e7 g4g5 e7b4
+				info depth 33 seldepth 44 multipv 6 score cp -51 nodes 3221860987 nps 18742864 hashfull 422 tbhits 31 time 171898 pv f8e7 a2a3 d8c7 d4c5 e7c5 e3c5 d7c5 d1d2 c5d7 e2d3 f7f6 e5f6 d7f6 e1d1 h8f8 h1e1 e8f7 b2b3 c8d7 d1c1 f7g8 g2g3 a8c8 c1b2 b7b5 c3a2 a6a5 a2c3 b5b4 c3b5 b4a3 a1a3 c7b8 f3d4 c6d4 b5d4 b8b6 d4f3 a5a4
+				info depth 34 currmove b7b6 cu
+			*/
+
+			// go infinite searchmoves c5d4 b7b5 f8e7
+			a.input <- "isready"
 		case "readyok":
-			input <- "ucinewgame"
-			break readyOKLoop
+			if sentNewGame {
+				break readyOKLoop
+			}
+			sentNewGame = true
+			a.input <- "ucinewgame"
+			a.input <- "isready"
 		}
 	}
 
@@ -424,7 +502,7 @@ readyOKLoop:
 		totalPlies := len(moves)
 		for {
 			ply := int(atomic.LoadInt64(&curPly))
-			evals := getLines(ctx, ply, totalPlies, output, input, maxTimePerPly, true, 60*time.Second)
+			evals := a.getLines(ctx, ply, totalPlies, maxTimePerPly, true)
 			select {
 			case <-ctx.Done():
 				logInfo("debug: getLines loop exited")
@@ -473,26 +551,22 @@ readyOKLoop:
 			startFEN := board.Clone().Moves(playerMoveUCI).FEN()
 
 			pgn := evalToPGN(startFEN, depth, movesEval, false)
-			fmt.Println(pgn)
+			logMultiline(pgn)
 
 			tbl := debugEvalTable(startFEN, movesEval)
-			fmt.Println(tbl)
+			logMultiline(tbl)
 
-			bookMoves := createOpeningBook(startFEN, movesEval)
-			/*bookIndent, err := json.MarshalIndent(bookMoves, "", "  ")
-			if err != nil {
-				log.Fatal(err)
-			}
-			fmt.Printf("\n%s\n\n", string(bookIndent))*/
-
+			/*bookMoves := createOpeningBook(startFEN, movesEval)
 			if err := saveBookMoves(bookMoves); err != nil {
 				log.Fatal(err)
-			}
+			}*/
 		}
 
+		// TODO: check if player's move was in initial multipv/depth check
+
 		m := strings.Join(beforeMoves, " ")
-		input <- fmt.Sprintf("position fen %s moves %s", startPosFEN, m)
-		input <- fmt.Sprintf("go depth %d", depth)
+		a.input <- fmt.Sprintf("position fen %s moves %s", startPosFEN, m)
+		a.input <- fmt.Sprintf("go depth %d", depth)
 
 	loop:
 		for {
@@ -505,7 +579,7 @@ readyOKLoop:
 				bestMove := bestEval(evals)
 
 				for _, eval := range evals {
-					fmt.Printf("depth=%d move=%s cp=%d\n", eval.Depth, eval.UCIMove, eval.CP)
+					logInfo(fmt.Sprintf("depth=%d move=%s cp=%d", eval.Depth, eval.UCIMove, eval.CP))
 				}
 
 				newMove := Move{
@@ -519,7 +593,7 @@ readyOKLoop:
 
 				// not the best move, eval player's move
 				if bestMove.UCIMove != playerMoveUCI {
-					input <- fmt.Sprintf("go depth %d searchmoves %s", depth, playerMoveUCI)
+					a.input <- fmt.Sprintf("go depth %d searchmoves %s", depth, playerMoveUCI)
 
 					evals := <-sf
 
@@ -598,10 +672,10 @@ readyOKLoop:
 	}
 
 	pgn := evalToPGN(startPosFEN, depth, movesEval, true)
-	fmt.Println(pgn)
+	logMultiline(pgn)
 
 	tbl := debugEvalTable(startPosFEN, movesEval)
-	fmt.Println(tbl)
+	logMultiline(tbl)
 
 	bookMoves := createOpeningBook(startPosFEN, movesEval)
 	/*bookIndent, err := json.MarshalIndent(bookMoves, "", "  ")
@@ -615,141 +689,214 @@ readyOKLoop:
 	}
 
 	if err := ioutil.WriteFile("eval.pgn", []byte(pgn), 0644); err != nil {
-		fmt.Println(pgn)
+		logMultiline(pgn)
 		log.Fatal(err)
 	}
 
-	input <- "quit"
+	a.input <- "quit"
 
-	//logInfo("quit sent, calling wg.Wait")
 	cancel()
-
 	wg.Wait()
-	//logInfo("wg.Wait returned")
+
+	if err := ReadBook(); err != nil {
+		return err
+	}
 
 	return nil
 }
 
-func (a *Analyzer) AnalyzePosition(ctx context.Context, fenPos string, depth int, maxTime time.Duration) error {
-	logInfo("start")
-
-	board := fen.FENtoBoard(fenPos)
-
-	if board.IsMate() {
-		// TODO: stalemate
-		// TODO: what if a position is already game over?
-		/*movesEval = append(movesEval, Move{
-			Ply:    i,
-			UCI:    playerMoveUCI,
-			SAN:    sanMove,
-			IsMate: true,
-			Eval:   Eval{Mated: true},
-		})*/
-		return fmt.Errorf("TODO: position '%s' is already game over", fenPos)
-	}
-
-	var white bool
-	if board.ActiveColor == "w" {
-		white = true
-	} else if board.ActiveColor == "b" {
-		white = false
-	} else {
-		return fmt.Errorf("active color '%s'; expected w or b", board.ActiveColor)
-	}
-
-	input := make(chan string, 512)
-	output := make(chan string, 512)
-
+func (a *Analyzer) AnalyzePosition(ctx context.Context, fenPos string) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	wg, err := startStockfish(ctx, input, output)
+	wg, err := a.startStockfish(ctx)
 	if err != nil {
 		return err
 	}
 
-	input <- "uci"
+	var sentNewGame bool
+	var playerNumber int
+
+	_ = playerNumber
+
+	board := fen.FENtoBoard(fenPos)
+	if board.ActiveColor == "w" {
+		playerNumber = 0
+	} else {
+		playerNumber = 1
+	}
 
 readyOKLoop:
-	for line := range output {
+	for line := range a.output {
 		switch line {
 		case "uciok":
-			logInfo("uciok")
-			input <- fmt.Sprintf("setoption name Threads value %d", threads)
-			input <- fmt.Sprintf("setoption name Hash value %d", threads*threadsHashMultiplier)
-			input <- fmt.Sprintf("setoption name MultiPV value 6")
-			input <- fmt.Sprintf("setoption name SyzygyPath value %s", syzygyPath)
-			input <- fmt.Sprintf("setoption name UCI_AnalyseMode value true")
-			input <- "isready"
+			a.input <- fmt.Sprintf("setoption name Threads value %d", threads)
+			a.input <- fmt.Sprintf("setoption name Hash value %d", hashMemory)
+			a.input <- fmt.Sprintf("setoption name MultiPV value %d", multiPV)
+			a.input <- fmt.Sprintf("setoption name SyzygyPath value %s", SyzygyPath)
+			a.input <- fmt.Sprintf("setoption name UCI_AnalyseMode value true")
+			a.input <- "isready"
 		case "readyok":
-			input <- "ucinewgame"
-			input <- fmt.Sprintf("position fen %s", fenPos)
-			input <- fmt.Sprintf("go depth %d", depth)
-			break readyOKLoop
+			if sentNewGame {
+				break readyOKLoop
+			}
+			sentNewGame = true
+			a.input <- "ucinewgame"
+			a.input <- "isready"
 		}
 	}
 
-	logInfo(fmt.Sprintf("depth = %d", depth))
+	a.input <- fmt.Sprintf("position fen %s", fenPos)
 
-	var povMultiplier int
-	if white {
-		povMultiplier = 1
-	} else {
-		povMultiplier = -1
-	}
+	var searchMoves string
 
-	evals := getLines(ctx, 0, 1, output, input, maxTime, true, 15*time.Second)
-	if len(evals) == 0 {
-		return fmt.Errorf("no evaluations returned for fen '%s'", fenPos)
+	for i := 0; i < 3; i++ {
+		var (
+			depth      int
+			maxTime    time.Duration
+			maxSurvive int
+		)
+
+		switch i {
+		case 0:
+			depth = 30
+			maxTime = 10 * time.Minute
+			maxSurvive = 5
+		case 1:
+			depth = 40
+			maxTime = 10 * time.Minute
+			maxSurvive = 4
+		case 2:
+			depth = 60
+			maxTime = 20 * time.Minute
+			maxSurvive = 3
+		}
+
+		logInfo(fmt.Sprintf("start depth=%d searchmoves %s fen %s", depth, searchMoves, fenPos))
+
+		evals, err := a.analyzePosition(ctx, fenPos, depth, searchMoves, maxTime)
+		if err != nil {
+			return fmt.Errorf("searchmoves '%s': %v", searchMoves, err)
+		}
+
+		searchMoves = ""
+
+		if len(evals) > maxSurvive {
+			evals = evals[:maxSurvive]
+		}
+		for _, eval := range evals {
+			if searchMoves != "" {
+				searchMoves += " "
+			}
+			searchMoves += eval.UCIMove
+		}
+
+		logInfo(fmt.Sprintf("new searchMoves: '%s'", searchMoves))
 	}
 
 	logInfo("sending quit")
-	input <- "quit"
-
-	for _, eval := range evals {
-		fmt.Printf("depth=%d move=%s cp=%d\n", eval.Depth, eval.UCIMove, eval.CP)
-	}
-
-	bestMove := bestEval(evals).Clone()
-	bestMove.CP *= povMultiplier
-	bestMove.Mate *= povMultiplier
-
-	board.Moves()
-	newMove := Move{
-		Ply:        1,
-		UCI:        bestMove.UCIMove,
-		SAN:        board.UCItoSAN(bestMove.UCIMove),
-		Eval:       bestMove.Clone(),
-		BestMove:   bestMove.Clone(),
-		IsMate:     board.IsMate(),
-		OtherEvals: append([]Eval(nil), evals...),
-	}
-
-	for j := 0; j < len(newMove.OtherEvals); j++ {
-		newMove.OtherEvals[j].CP *= povMultiplier
-		newMove.OtherEvals[j].Mate *= povMultiplier
-	}
-
-	logInfo(fmt.Sprintf("%3d/%3d %3d. top_move: %-7s top_cp: %6d top_mate: %2d",
-		1, 1, 1, newMove.SAN, bestMove.CP, bestMove.Mate))
-
-	var movesEval Moves
-	movesEval = append(movesEval, newMove)
-
-	bookMoves := createOpeningBook(fenPos, movesEval)
-	if err := saveBookMoves(bookMoves); err != nil {
-		log.Fatal(err)
-	}
-
-	pgn := evalToPGN(fenPos, depth, movesEval, false)
-	fmt.Println(pgn)
-
-	tbl := debugEvalTable(fenPos, movesEval)
-	fmt.Println(tbl)
+	a.input <- "quit"
 
 	cancel()
 	wg.Wait()
 
 	return nil
+}
+
+func (a *Analyzer) waitReady() {
+	a.input <- "isready"
+	for line := range a.output {
+		if line == "readyok" {
+			break
+		}
+	}
+}
+
+var timeAround = 0
+
+func (a *Analyzer) analyzePosition(ctx context.Context, fenPos string, depth int, searchMoves string, maxTime time.Duration) ([]Eval, error) {
+	board := fen.FENtoBoard(fenPos)
+	timeAround++
+
+	if board.IsMate() {
+		return nil, fmt.Errorf("TODO: position '%s' is already game over", fenPos)
+	}
+
+	var (
+		playerNumber  int
+		povMultiplier int
+	)
+	if board.ActiveColor == "w" {
+		playerNumber = 0
+		povMultiplier = 1
+	} else if board.ActiveColor == "b" {
+		playerNumber = 1
+		povMultiplier = -1
+	} else {
+		return nil, fmt.Errorf("active color '%s'; expected w or b", board.ActiveColor)
+	}
+
+	if searchMoves == "" {
+		fmt.Printf("HAM path")
+		a.input <- fmt.Sprintf("setoption name MultiPV value %d", multiPV)
+		a.input <- fmt.Sprintf("go depth %d", depth)
+		if timeAround > 1 {
+			log.Fatal("figure it out")
+		}
+		timeAround++
+	} else {
+		fmt.Printf("SPAM path")
+		a.input <- fmt.Sprintf("setoption name MultiPV value %d", len(strings.Split(searchMoves, " ")))
+		a.input <- fmt.Sprintf("go depth %d searchmoves %s", depth, searchMoves)
+	}
+
+	evals := a.getLines(ctx, 0, 1, maxTime, true)
+	if len(evals) == 0 {
+		return nil, fmt.Errorf("no evaluations returned for fen '%s'", fenPos)
+	}
+
+	for j := 0; j < len(evals); j++ {
+		evals[j].CP *= povMultiplier
+		evals[j].Mate *= povMultiplier
+	}
+
+	curDepth := 0
+	logInfo("")
+	newestEvals := evalsWithHighestDepth(evals)
+	var bestMoveAtDepth Eval
+	for _, eval := range evals {
+		san := board.UCItoSAN(eval.UCIMove)
+		if eval.Depth > curDepth {
+			curDepth = eval.Depth
+			newestEvals = nil
+			bestMoveAtDepth = eval.Clone()
+		} else if eval.Depth != curDepth {
+			continue
+		}
+		diff := povDiff(playerNumber, eval, bestMoveAtDepth)
+
+		var mark string
+		if diff < cutoff {
+			mark = "XXX"
+		} else {
+			newestEvals = append(newestEvals, eval.Clone())
+		}
+
+		logInfo(fmt.Sprintf("depth: %d move: %-7s %s cp: %4d wc-diff: %6.2f %s", eval.Depth, san, eval.UCIMove, eval.CP, diff, mark))
+	}
+	logInfo("")
+
+	bestMove := bestEval(newestEvals).Clone()
+
+	for _, eval := range newestEvals {
+		san := board.UCItoSAN(eval.UCIMove)
+		diff := povDiff(playerNumber, eval, bestMove)
+		logInfo(fmt.Sprintf("*** depth: %d move: %-7s %s cp: %4d wc-diff: %0.2f", eval.Depth, san, eval.UCIMove, eval.CP, diff))
+	}
+
+	logInfo(fmt.Sprintf("%3d/%3d %3d. top_move: %-7s top_cp: %6d top_mate: %2d",
+		1, 1, 1, board.UCItoSAN(bestMove.UCIMove), bestMove.CP, bestMove.Mate))
+
+	return newestEvals, nil
 }
 
 type BookMove struct {
@@ -1107,7 +1254,7 @@ func writeVariation(sb *strings.Builder, board *fen.Board, eval Eval, annotation
 	sb.WriteString(")\n")
 }
 
-func startStockfish(ctx context.Context, input <-chan string, output chan<- string) (*sync.WaitGroup, error) {
+func (a *Analyzer) startStockfish(ctx context.Context) (*sync.WaitGroup, error) {
 	binary := "/home/jud/projects/trollfish/stockfish/stockfish"
 	dir := "/home/jud/projects/trollfish/stockfish"
 
@@ -1142,30 +1289,15 @@ func startStockfish(ctx context.Context, input <-chan string, output chan<- stri
 		defer wg.Done()
 		for {
 			select {
-			case line := <-input:
+			case line := <-a.input:
 				for atomic.LoadInt64(&readyok) == 0 {
-					time.Sleep(1 * time.Millisecond)
+					time.Sleep(10 * time.Millisecond)
 				}
 
-				writeLog := true
-				if line == "uci" || line == "ucinewgame" || line == "stop" {
-					writeLog = false
-				}
-				if strings.HasPrefix(line, "go depth") {
-					writeLog = false
-				}
-				if strings.HasPrefix(line, "position fen") {
-					writeLog = false
-				}
-				if strings.HasPrefix(line, "setoption name") {
-					writeLog = false
-				}
-
-				if writeLog || atomic.LoadInt64(&readyok) == 0 {
-					logInfo(fmt.Sprintf("-> %s", line))
-				}
+				a.LogEngine(line)
 
 				if line == "isready" {
+					logInfo("-> isready")
 					atomic.StoreInt64(&readyok, 0)
 				}
 
@@ -1207,6 +1339,7 @@ func startStockfish(ctx context.Context, input <-chan string, output chan<- stri
 	go func() {
 		defer wg.Done()
 		r := bufio.NewScanner(stdout)
+		var sentUCIInit bool
 		for r.Scan() {
 			select {
 			case <-ctx.Done():
@@ -1216,13 +1349,20 @@ func startStockfish(ctx context.Context, input <-chan string, output chan<- stri
 			}
 
 			line := r.Text()
-			output <- line
+			if showEngineOutput(line) {
+				a.LogEngine(line)
+			}
+
+			if !sentUCIInit {
+				a.input <- "uci"
+				sentUCIInit = true
+			}
+
+			a.output <- line
 
 			if line == "readyok" {
 				logInfo("<- readyok")
 				atomic.StoreInt64(&readyok, 1)
-			} else if atomic.LoadInt64(&readyok) == 0 {
-				logInfo(line)
 			}
 		}
 		if err := r.Err(); err != nil {
@@ -1244,8 +1384,27 @@ func startStockfish(ctx context.Context, input <-chan string, output chan<- stri
 	return &wg, nil
 }
 
+func showEngineOutput(line string) bool {
+	parts := strings.Split(line, " ")
+	if len(parts) == 7 {
+		if parts[0] == "info" && parts[1] == "depth" && parts[3] == "currmove" && parts[5] == "currmovenumber" {
+			return false
+		}
+	}
+	return true
+}
+
 func logInfo(msg string) {
-	fmt.Printf("%s %s\n", ts(), msg)
+	_, _ = fmt.Fprintf(os.Stderr, "# %s %s\n", ts(), strings.TrimRight(msg, "\n"))
+}
+
+func logMultiline(s string) {
+	parts := strings.Split(s, "\n")
+	var sb strings.Builder
+	for _, part := range parts {
+		sb.WriteString(fmt.Sprintf("# %s\n", part))
+	}
+	_, _ = fmt.Fprint(os.Stderr, sb.String())
 }
 
 func ts() string {
@@ -1276,7 +1435,7 @@ func ReadBook() error {
 
 	for i := 0; i < len(book); i++ {
 		move := book[i]
-		if move.Depth < 10 {
+		if move.Depth < 18 {
 			book = append(book[:i], book[i+1:]...)
 			i--
 			continue
@@ -1446,9 +1605,9 @@ func getBlessedMove(posFEN string, book []BookMove) (BlessedMove, error) {
 	}
 
 	ranges := []depthRange{
-		{minDepth: 18, maxDepth: 30},
-		{minDepth: 31, maxDepth: 40},
-		{minDepth: 41, maxDepth: 100},
+		{minDepth: depthTier1, maxDepth: depthTier1 - 1},
+		{minDepth: depthTier2, maxDepth: depthTier3 - 1},
+		{minDepth: depthTier3, maxDepth: 100},
 	}
 
 	ensemble := make(map[string]int)
@@ -1505,9 +1664,12 @@ func getBlessedMove(posFEN string, book []BookMove) (BlessedMove, error) {
 	bestMove := moves[0]
 	board := fen.FENtoBoard(posFEN)
 
+	var sb strings.Builder
 	for _, move := range moves {
-		fmt.Printf("%7s %s: %0.2f\n", board.UCItoSAN(move.UCI), move.UCI, float64(move.CP)/100)
+		sb.WriteString(fmt.Sprintf("%7s %s: %0.2f\n", board.UCItoSAN(move.UCI), move.UCI, float64(move.CP)/100))
 	}
+	logMultiline(sb.String())
+
 	san := board.UCItoSAN(bestMove.UCI)
 
 	blessed := BlessedMove{FEN: posFEN, UCI: bestMove.UCI, SAN: san, CP: bestMove.CP * povMultiplier, Mate: bestMove.Mate * povMultiplier}
@@ -1516,7 +1678,21 @@ func getBlessedMove(posFEN string, book []BookMove) (BlessedMove, error) {
 		return BlessedMove{}, err
 	}
 
-	fmt.Printf("%s\n", blessedJSON)
+	logMultiline(string(blessedJSON))
 
 	return blessed, nil
+}
+
+func (a *Analyzer) LogEngine(s string) {
+	a.logEngineMtx.Lock()
+	_, _ = fmt.Fprintln(os.Stdout, s)
+	a.logEngineMtx.Unlock()
+}
+
+func (a *Analyzer) howMichael(evals []Eval) []string {
+	var s []string
+	for _, eval := range evals {
+		s = append(s, eval.UCIMove)
+	}
+	return s
 }

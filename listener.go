@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"trollfish-lichess/analyze"
 	"trollfish-lichess/api"
 )
 
@@ -19,8 +20,6 @@ const botID = "trollololfish"
 const startPosFEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
 const maxRating = 3100
 const minRating = 2001
-
-const syzygyPath = "/home/jud/projects/tablebase/3-4-5"
 
 type Listener struct {
 	ctx context.Context
@@ -51,7 +50,7 @@ func New(ctx context.Context, input chan<- string, output <-chan string) *Listen
 		accepted: make(chan api.GameEventInfo, 512),
 	}
 	input <- "uci"
-	input <- fmt.Sprintf("setoption name SyzygyPath value %s", syzygyPath)
+	input <- fmt.Sprintf("setoption name SyzygyPath value %s", analyze.SyzygyPath)
 
 	go func() {
 		botQueue, err := api.StreamBots()
