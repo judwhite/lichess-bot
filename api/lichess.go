@@ -14,7 +14,8 @@ import (
 )
 
 const allRatings = "1600,1800,2000,2200,2500"
-const allSpeeds = "bullet,blitz,rapid,classical"
+const allSpeeds = "bullet,blitz,rapid,classical,correspondence"
+const startPosFEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
 
 type Move struct {
 	UCI           string `json:"uci"`
@@ -48,6 +49,9 @@ func Lookup(fen, play string) (PositionResults, error) {
 		return result, err
 	}
 	q := u.Query()
+	if fen == "" || fen == "start" || fen == "startpos" {
+		fen = startPosFEN
+	}
 	q.Add("fen", fen)
 	if play != "" {
 		q.Add("play", play)
@@ -65,13 +69,17 @@ func Lookup(fen, play string) (PositionResults, error) {
 
 	defer resp.Body.Close()
 
-	dec := json.NewDecoder(resp.Body)
-	if err := dec.Decode(&result); err != nil {
+	b, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
 		return result, err
 	}
 
 	if resp.StatusCode != 200 {
-		return result, fmt.Errorf("http status code %d", resp.StatusCode)
+		return result, fmt.Errorf("http status code %d. %s", resp.StatusCode, b)
+	}
+
+	if err := json.Unmarshal(b, &result); err != nil {
+		return result, fmt.Errorf("%v. %s", err, b)
 	}
 
 	total := result.White + result.Black + result.Draws
