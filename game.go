@@ -4,11 +4,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"math/rand"
 	"strings"
 	"sync"
 	"time"
-
 	"trollfish-lichess/api"
+	"trollfish-lichess/fen"
+	"trollfish-lichess/polyglot"
 )
 
 type Game struct {
@@ -27,14 +29,17 @@ type Game struct {
 
 	input  chan<- string
 	output <-chan string
+
+	book map[uint64][]*BookEntry
 }
 
-func NewGame(gameID string, input chan<- string, output <-chan string) *Game {
+func NewGame(gameID string, input chan<- string, output <-chan string, book map[uint64][]*BookEntry) *Game {
 	return &Game{
 		gameID:       gameID,
 		playerNumber: -1,
 		input:        input,
 		output:       output,
+		book:         book,
 	}
 }
 
@@ -139,6 +144,7 @@ func (g *Game) handleGameFull(ndjson []byte) {
 	} else {
 		rated = "Unrated"
 	}
+
 	initialTime := time.Duration(game.Clock.Initial) * time.Millisecond
 	increment := time.Duration(game.Clock.Increment) * time.Millisecond
 	timeControl := fmt.Sprintf("%v+%v", initialTime, increment)
@@ -228,35 +234,50 @@ func (g *Game) playMove(ndjson []byte, state api.State) {
 		return
 	}
 
-	pos := fmt.Sprintf("position fen %s moves %s", startPosFEN, state.Moves)
-	goCmd := fmt.Sprintf("go wtime %d winc %d btime %d binc %d",
-		state.WhiteTime, state.WhiteInc,
-		state.BlackTime, state.BlackInc,
-	)
+	var bestMove string
 
-	g.input <- pos
-	g.input <- goCmd
+	// check book
+	b := fen.FENtoBoard(startPosFEN)
+	b.Moves(moves...)
+	key := polyglot.Key(b)
+	bookMoves, ok := g.book[key]
 
-	fmt.Printf("%s thinking...\n", ts())
+	if ok {
+		n := rand.Intn(len(bookMoves)) // TODO: use freq field
+		bookMove := bookMoves[n]
+		uci := polyglot.ToUCIMove(b, bookMove.Move)
+		bestMove = uci
+		fmt.Printf("%s %s %s came from book\n", b.FEN(), b.UCItoSAN(uci), uci)
+	} else {
+		pos := fmt.Sprintf("position fen %s moves %s", startPosFEN, state.Moves)
+		goCmd := fmt.Sprintf("go wtime %d winc %d btime %d binc %d",
+			state.WhiteTime, state.WhiteInc,
+			state.BlackTime, state.BlackInc,
+		)
 
-	var bestmove string
-	for item := range g.output {
-		if strings.HasPrefix(item, "bestmove ") {
-			p := strings.Split(item, " ")
-			bestmove = p[1]
-			g.input <- "stop"
-			break
-		} else if strings.Contains(item, " eval ") {
-			if strings.Contains(item, "eval 0.00") {
-				g.likelyDraw++
-			} else {
-				g.likelyDraw = 0
+		g.input <- pos
+		g.input <- goCmd
+
+		fmt.Printf("%s thinking...\n", ts())
+
+		for item := range g.output {
+			if strings.HasPrefix(item, "bestmove ") {
+				p := strings.Split(item, " ")
+				bestMove = p[1]
+				g.input <- "stop"
+				break
+			} else if strings.Contains(item, " eval ") {
+				if strings.Contains(item, "eval 0.00") {
+					g.likelyDraw++
+				} else {
+					g.likelyDraw = 0
+				}
 			}
 		}
 	}
 
-	if bestmove != "" {
-		if err := api.PlayMove(g.gameID, bestmove, g.likelyDraw > 10); err != nil {
+	if bestMove != "" {
+		if err := api.PlayMove(g.gameID, bestMove, g.likelyDraw > 10); err != nil {
 			// '{"error":"Not your turn, or game already over"}'
 			// TODO: we should handle the opponent resigning, flagging or aborting while we're thinking
 			fmt.Printf("*** ERR: api.PlayMove: %v: %s\n", err, string(ndjson))
@@ -265,7 +286,7 @@ func (g *Game) playMove(ndjson []byte, state api.State) {
 			return
 		}
 
-		fmt.Printf("%s game: %s move: %s\n", ts(), g.gameID, bestmove)
+		fmt.Printf("%s game: %s move: %s\n", ts(), g.gameID, bestMove)
 
 		if g.gaveTime {
 			fmt.Printf("%s our_time: %v opp_time: %v gave_time: %v\n", ts(), ourTime, opponentTime, g.gaveTime)

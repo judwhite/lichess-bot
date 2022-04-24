@@ -1,12 +1,15 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"log"
 	"math/rand"
+	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -23,6 +26,8 @@ const minRating = 2001
 
 type Listener struct {
 	ctx context.Context
+
+	book map[uint64][]*BookEntry
 
 	activeGameMtx sync.Mutex
 	activeGame    *Game
@@ -41,6 +46,14 @@ type Listener struct {
 	output <-chan string
 }
 
+type BookEntry struct {
+	Move uint16 `json:"move"`
+	Freq uint16 `json:"freq"`
+
+	FEN     string `json:"fen"`
+	UCIMove string `json:"uci"`
+}
+
 func New(ctx context.Context, input chan<- string, output <-chan string) *Listener {
 	l := Listener{
 		ctx:      ctx,
@@ -48,9 +61,14 @@ func New(ctx context.Context, input chan<- string, output <-chan string) *Listen
 		output:   output,
 		declined: make(chan api.Challenge, 512),
 		accepted: make(chan api.GameEventInfo, 512),
+		book:     make(map[uint64][]*BookEntry),
 	}
 	input <- "uci"
 	input <- fmt.Sprintf("setoption name SyzygyPath value %s", analyze.SyzygyPath)
+
+	if err := l.importBook("book.bin"); err != nil {
+		log.Fatal(err)
+	}
 
 	go func() {
 		botQueue, err := api.StreamBots()
@@ -66,6 +84,49 @@ func New(ctx context.Context, input chan<- string, output <-chan string) *Listen
 	}()
 
 	return &l
+}
+
+func (l *Listener) importBook(filename string) error {
+	fmt.Printf("%s loading book %s...\n", ts(), filename)
+
+	fp, err := os.Open(filename)
+	if err != nil {
+		return err
+	}
+	defer fp.Close()
+
+	r := bufio.NewReaderSize(fp, 16384)
+	buf := make([]byte, 32)
+	for {
+		n, err := r.Read(buf)
+		if err == io.EOF {
+			break
+		} else if err != nil {
+			return err
+		}
+
+		if n != 32 {
+			log.Fatalf("n=%d, need to do something about this", n)
+		}
+
+		key := (uint64(buf[0]) << (7 * 8)) +
+			(uint64(buf[1]) << (6 * 8)) +
+			(uint64(buf[2]) << (5 * 8)) +
+			(uint64(buf[3]) << (4 * 8)) +
+			(uint64(buf[4]) << (3 * 8)) +
+			(uint64(buf[5]) << (2 * 8)) +
+			(uint64(buf[6]) << (1 * 8)) +
+			uint64(buf[7])
+
+		move := (uint16(buf[8]) << 8) | uint16(buf[9])
+		freq := (uint16(buf[10]) << 8) | uint16(buf[11])
+
+		l.book[key] = append(l.book[key], &BookEntry{Move: move, Freq: freq})
+	}
+
+	fmt.Printf("%s book loaded. positions: %d\n", ts(), len(l.book))
+
+	return nil
 }
 
 func (l *Listener) Events() error {
@@ -99,7 +160,7 @@ func (l *Listener) Events() error {
 				log.Fatalf("%v json: '%s' len=%d", err, ndjson, len(ndjson))
 			}
 			g := gameEvent.Game
-			game := NewGame(g.GameID, l.input, l.output)
+			game := NewGame(g.GameID, l.input, l.output, l.book)
 
 			l.activeGameMtx.Lock()
 			if l.activeGame != nil {
