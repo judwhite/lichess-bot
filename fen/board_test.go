@@ -475,7 +475,7 @@ func TestBoard_LegalMoves(t *testing.T) {
 			b := FENtoBoard(c.fen)
 
 			// act
-			legalMoves := b.LegalMoves()
+			legalMoves := b.legalMoves()
 
 			// assert
 			var got []string

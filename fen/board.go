@@ -161,7 +161,7 @@ func (b *Board) UCItoSAN(move string) string {
 			san += string(piece)
 		}
 
-		legalMoves := b.LegalMoves()
+		legalMoves := b.legalMoves()
 		var otherSources []string
 		for i := 0; i < len(legalMoves); i++ {
 			// check source squares are different
@@ -268,12 +268,16 @@ func (b *Board) Moves(moves ...string) *Board {
 		}
 	}
 
-	for _, move := range moves {
+	for moveIdx, move := range moves {
 		if activeColor == 1 {
 			activeColor = 0
 			fullMove++
 		} else {
 			activeColor = 1
+		}
+
+		if len(move) < 4 {
+			panic(fmt.Errorf("UCI move '%s' is invalid, index=%d, len=%d", move, moveIdx, len(moves)))
 		}
 
 		fromUCI := move[:2]
@@ -631,12 +635,36 @@ func (b *Board) Clone() *Board {
 	return &newBoard
 }
 
-type fromTo struct {
+type LegalMove struct {
+	SAN string
+	UCI string
+}
+
+type legalMove struct {
 	from int
 	to   int
 }
 
-func (b *Board) LegalMoves() []fromTo {
+func (b *Board) LegalMoves() []LegalMove {
+	moves := b.legalMoves()
+	sanMoves := make([]LegalMove, 0, len(moves)+4)
+	for _, m := range moves {
+		uci := indexToSquare(m.from) + indexToSquare(m.to)
+		p := b.Pos[m.from]
+		if (p == 'p' && m.to >= 56) || (p == 'P' && m.to < 8) {
+			for _, promote := range []string{"n", "b", "r", "q"} {
+				promoteUCI := uci + promote
+				sanMoves = append(sanMoves, LegalMove{UCI: promoteUCI, SAN: b.UCItoSAN(promoteUCI)})
+			}
+		} else {
+			sanMoves = append(sanMoves, LegalMove{UCI: uci, SAN: b.UCItoSAN(uci)})
+		}
+	}
+
+	return sanMoves
+}
+
+func (b *Board) legalMoves() []legalMove {
 	var king, queen, bishop, knight, rook, pawn rune
 	if b.ActivePlayer() == WhitePieces {
 		king, queen, bishop, knight, rook, pawn = 'K', 'Q', 'B', 'N', 'R', 'P'
@@ -644,7 +672,7 @@ func (b *Board) LegalMoves() []fromTo {
 		king, queen, bishop, knight, rook, pawn = 'k', 'q', 'b', 'n', 'r', 'p'
 	}
 
-	var moves []fromTo
+	var moves []legalMove
 
 	for i := 0; i < 64; i++ {
 		var pieceMoves []int
@@ -666,7 +694,7 @@ func (b *Board) LegalMoves() []fromTo {
 		}
 
 		for _, pieceMove := range pieceMoves {
-			moves = append(moves, fromTo{from: i, to: pieceMove})
+			moves = append(moves, legalMove{from: i, to: pieceMove})
 		}
 	}
 
