@@ -1,6 +1,7 @@
 package fen
 
 import (
+	"bytes"
 	"fmt"
 	"reflect"
 	"sort"
@@ -17,7 +18,7 @@ func TestFENtoBoard(t *testing.T) {
 		wantEnPassantSquare string
 		wantHalfMoveClock   string
 		wantFullMove        string
-		wantPos             []rune
+		wantPos             []byte
 	}{
 		{
 			fen:                 "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
@@ -26,7 +27,7 @@ func TestFENtoBoard(t *testing.T) {
 			wantEnPassantSquare: "-",
 			wantHalfMoveClock:   "0",
 			wantFullMove:        "1",
-			wantPos: []rune{
+			wantPos: []byte{
 				'r', 'n', 'b', 'q', 'k', 'b', 'n', 'r',
 				'p', 'p', 'p', 'p', 'p', 'p', 'p', 'p',
 				' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ',
@@ -44,7 +45,7 @@ func TestFENtoBoard(t *testing.T) {
 			wantEnPassantSquare: "-",
 			wantHalfMoveClock:   "6",
 			wantFullMove:        "5",
-			wantPos: []rune{
+			wantPos: []byte{
 				'r', ' ', 'b', ' ', 'k', 'b', 'n', 'r',
 				'p', 'p', 'p', 'p', ' ', 'p', 'p', 'p',
 				' ', ' ', 'n', ' ', ' ', ' ', ' ', ' ',
@@ -57,8 +58,8 @@ func TestFENtoBoard(t *testing.T) {
 		},
 	}
 
-	sq := func(c rune) string {
-		if c == 0 {
+	sq := func(c byte) string {
+		if c == 0 || c == ' ' {
 			return " "
 		}
 		return string(c)
@@ -70,7 +71,7 @@ func TestFENtoBoard(t *testing.T) {
 			board := FENtoBoard(c.fen)
 
 			// assert
-			if !reflect.DeepEqual(c.wantPos, board.Pos) {
+			if !bytes.Equal(c.wantPos, board.Pos[:]) {
 				var (
 					loc       string
 					want, got strings.Builder
@@ -78,6 +79,13 @@ func TestFENtoBoard(t *testing.T) {
 				writeBoth := func(s string) {
 					want.WriteString(s)
 					got.WriteString(s)
+				}
+
+				var diff strings.Builder
+				for i := 0; i < 64; i++ {
+					if c.wantPos[i] != board.Pos[i] {
+						diff.WriteString(fmt.Sprintf("index: %d want: '%c' %d got: '%c' %d", i, c.wantPos[i], c.wantPos[i], board.Pos[i], board.Pos[i]))
+					}
 				}
 
 				writeBoth("   abcdefgh\n   --------\n")
@@ -104,7 +112,7 @@ func TestFENtoBoard(t *testing.T) {
 				}
 
 				var sb strings.Builder
-				sb.WriteString(fmt.Sprintf("board differs at %s\nwant:\n%s\ngot:\n%s", loc, want.String(), got.String()))
+				sb.WriteString(fmt.Sprintf("board differs at '%s', %s\nwant:\n%s\ngot:\n%s", loc, diff.String(), want.String(), got.String()))
 				t.Error(sb.String())
 			}
 			if board.ActiveColor != c.wantActiveColor {

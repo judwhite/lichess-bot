@@ -264,7 +264,7 @@ var pgTable = [...]uint64{
 	0xF8D626AAAF278509,
 }
 
-func pieceToInt(p rune) int {
+func pieceToInt(p byte) int {
 	switch p {
 	case 'p':
 		return 0

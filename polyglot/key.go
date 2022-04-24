@@ -15,7 +15,7 @@ func Key(board fen.Board) uint64 {
 	return piece ^ castle ^ ep ^ turn
 }
 
-func pieceKey(pos []rune) uint64 {
+func pieceKey(pos [64]byte) uint64 {
 	var key uint64
 
 	for i, p := range pos {
@@ -54,7 +54,7 @@ func castleKey(castling string) uint64 {
 	return key
 }
 
-func enPassantKey(pos []rune, square string) uint64 {
+func enPassantKey(pos [64]byte, square string) uint64 {
 	if square == "" || square == "-" {
 		return 0
 	}
@@ -62,7 +62,7 @@ func enPassantKey(pos []rune, square string) uint64 {
 	idx := uciToIndex(square)
 	file := int(square[0]) - 'a'
 	var flag bool
-	var enemyPiece rune
+	var enemyPiece byte
 	if square[1] == '6' {
 		// black pushed
 		idx += 8

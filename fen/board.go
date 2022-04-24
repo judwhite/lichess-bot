@@ -6,13 +6,12 @@ import (
 	"math"
 	"strconv"
 	"strings"
-	"unicode"
 )
 
 const startPosFEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
 
 type Board struct {
-	Pos             []rune
+	Pos             [64]byte
 	ActiveColor     string
 	Castling        string
 	EnPassantSquare string
@@ -102,7 +101,7 @@ func (b *Board) FENNoMoveClocks() string {
 				blanks = 0
 			}
 
-			fen.WriteRune(b.Pos[offset+j])
+			fen.WriteByte(b.Pos[offset+j])
 		}
 
 		if blanks != 0 {
@@ -132,8 +131,7 @@ func (b *Board) UCItoSAN(move string) string {
 	piece := b.Pos[from]
 	isCapture := b.Pos[to] != ' '
 
-	//white := unicode.IsUpper(piece)
-	piece = unicode.ToUpper(piece)
+	piece = upper(piece)
 
 	if toUCI == b.EnPassantSquare && piece == 'P' {
 		isCapture = true
@@ -282,9 +280,9 @@ func (b *Board) Moves(moves ...string) *Board {
 
 		fromUCI := move[:2]
 		toUCI := move[2:4]
-		var promote string
+		var promote byte
 		if len(move) > 4 {
-			promote = strings.ToUpper(string(move[4]))
+			promote = upper(move[4])
 		}
 
 		// castling privileges
@@ -342,11 +340,11 @@ func (b *Board) Moves(moves ...string) *Board {
 		}
 
 		// promotion
-		if promote != "" {
+		if promote != 0 {
 			if activeColor == 0 {
-				b.Pos[to] = unicode.ToLower(rune(promote[0]))
+				b.Pos[to] = lower(promote)
 			} else {
-				b.Pos[to] = unicode.ToUpper(rune(promote[0]))
+				b.Pos[to] = upper(promote)
 			}
 		}
 
@@ -431,14 +429,13 @@ func FENtoBoard(fen string) Board {
 		EnPassantSquare: parts[3],
 		HalfmoveClock:   parts[4],
 		FullMove:        parts[5],
-		Pos:             make([]rune, 64),
 	}
 
 	for i := 7; i >= 0; i-- {
-		rank := ranks[i]
+		rank := []byte(ranks[i])
 		offset := i * 8
 		for _, c := range rank {
-			if unicode.IsDigit(c) {
+			if isDigit(c) {
 				n := int(c) - 48
 				for j := 0; j < n; j++ {
 					b.Pos[offset] = ' '
@@ -471,13 +468,13 @@ func atoi(s string) int {
 
 func (b *Board) IsCheck() bool {
 	var (
-		ourKing     rune
-		enemyQueen  rune
-		enemyRook   rune
-		enemyBishop rune
-		enemyKnight rune
-		enemyPawn   rune
-		enemyKing   rune
+		ourKing     byte
+		enemyQueen  byte
+		enemyRook   byte
+		enemyBishop byte
+		enemyKnight byte
+		enemyPawn   byte
+		enemyKing   byte
 	)
 
 	var white bool
@@ -624,14 +621,13 @@ func indexToRankFile(index int) (int, int) {
 
 func (b *Board) Clone() *Board {
 	newBoard := Board{
-		Pos:             make([]rune, len(b.Pos)),
 		ActiveColor:     b.ActiveColor,
 		Castling:        b.Castling,
 		EnPassantSquare: b.EnPassantSquare,
 		HalfmoveClock:   b.HalfmoveClock,
 		FullMove:        b.FullMove,
 	}
-	copy(newBoard.Pos, b.Pos)
+	copy(newBoard.Pos[:], b.Pos[:])
 	return &newBoard
 }
 
@@ -665,7 +661,7 @@ func (b *Board) LegalMoves() []LegalMove {
 }
 
 func (b *Board) legalMoves() []legalMove {
-	var king, queen, bishop, knight, rook, pawn rune
+	var king, queen, bishop, knight, rook, pawn byte
 	if b.ActivePlayer() == WhitePieces {
 		king, queen, bishop, knight, rook, pawn = 'K', 'Q', 'B', 'N', 'R', 'P'
 	} else {
@@ -701,8 +697,8 @@ func (b *Board) legalMoves() []legalMove {
 	return moves
 }
 
-func (b *Board) isEnemyPiece(p rune) bool {
-	var king, queen, bishop, knight, rook, pawn rune
+func (b *Board) isEnemyPiece(p byte) bool {
+	var king, queen, bishop, knight, rook, pawn byte
 	if b.ActivePlayer() == WhitePieces {
 		king, queen, bishop, knight, rook, pawn = 'k', 'q', 'b', 'n', 'r', 'p'
 	} else {
@@ -951,4 +947,22 @@ func (b *Board) pathMoves(idx int, paths []nav) []int {
 	}
 
 	return moves
+}
+
+func upper(b byte) byte {
+	if b >= 'a' && b <= 'z' {
+		return b - 32
+	}
+	return b
+}
+
+func lower(b byte) byte {
+	if b >= 'A' && b <= 'Z' {
+		return b + 32
+	}
+	return b
+}
+
+func isDigit(b byte) bool {
+	return b >= '0' && b <= '9'
 }

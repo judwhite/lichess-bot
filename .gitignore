@@ -3,3 +3,6 @@ trollfish-lichess
 trollfish
 *.pgn
 *.log
+*.pprof
+*.test
+*.tmp
