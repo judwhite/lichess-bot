@@ -408,6 +408,9 @@ func (b *Board) Moves(moves ...string) *Board {
 }
 
 func FENtoBoard(fen string) Board {
+	if fen == "" {
+		fen = startPosFEN
+	}
 	parts := strings.Split(fen, " ")
 	ranks := strings.Split(parts[0], "/")
 
