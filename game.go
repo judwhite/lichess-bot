@@ -131,8 +131,10 @@ func (g *Game) handleGameFull(ndjson []byte) {
 		log.Fatalf("not your game %s vs %s\n", game.White.ID, game.Black.ID)
 	}
 
+	g.rated = game.Rated
+
 	var rated string
-	if game.Rated {
+	if g.rated {
 		rated = "Rated"
 	} else {
 		rated = "Unrated"

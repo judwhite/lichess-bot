@@ -59,6 +59,7 @@ type GameFull struct {
 type Clock struct {
 	Initial   int `json:"initial"`
 	Increment int `json:"increment"`
+	TotalTime int `json:"totalTime,omitempty"` // only set in completed games
 }
 
 type Perf struct {
@@ -83,5 +84,45 @@ type State struct {
 	Status    string `json:"status"`
 	Winner    string `json:"winner"`
 	WhiteDraw bool   `json:"wdraw"`
-	BlackDraw bool   `json:"wdraw"`
+	BlackDraw bool   `json:"bdraw"`
+}
+
+type CompletedGame struct {
+	ID         string  `json:"id"`
+	Rated      bool    `json:"rated"`
+	Variant    string  `json:"variant"`
+	Speed      string  `json:"speed"`
+	Perf       string  `json:"perf"`
+	CreatedAt  int64   `json:"createdAt"`
+	LastMoveAt int64   `json:"lastMoveAt"`
+	Status     string  `json:"status"`
+	Players    Players `json:"players"`
+	Winner     string  `json:"winner"`
+	Opening    Opening `json:"opening"`
+	Moves      string  `json:"moves"`
+	PGN        string  `json:"pgn"`
+	Clock      Clock   `json:"clock"`
+}
+
+type UserShort struct {
+	Name  string `json:"name"`
+	Title string `json:"title"`
+	ID    string `json:"id"`
+}
+
+type UserShortRating struct {
+	User       UserShort `json:"user"`
+	Rating     int       `json:"rating"`
+	RatingDiff int       `json:"ratingDiff"`
+}
+
+type Players struct {
+	White UserShortRating `json:"white"`
+	Black UserShortRating `json:"black"`
+}
+
+type Opening struct {
+	ECO  string `json:"eco"`
+	Name string `json:"name"`
+	Ply  int    `json:"ply"`
 }

@@ -43,9 +43,31 @@ type PositionResults struct {
 }
 
 func GetGames(username string, until time.Time, max int) error {
+	filename := username + ".pgn"
+	fp, err := os.OpenFile(filename, os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return err
+	}
+
+	w := bufio.NewWriter(fp)
+	defer func() {
+		w.Flush()
+		fp.Close()
+	}()
+
 	handler := func(ndjson []byte) bool {
-		fmt.Println("===============================================")
-		fmt.Printf("%s\n", ndjson)
+		var game CompletedGame
+		if err := json.Unmarshal(ndjson, &game); err != nil {
+			log.Fatal(err)
+		}
+
+		_, err := w.WriteString(game.PGN + "\n")
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		fmt.Print(game.PGN)
+
 		return true
 	}
 
@@ -55,14 +77,16 @@ func GetGames(username string, until time.Time, max int) error {
 	}
 	q := u.Query()
 	//q.Add("since", unixMilli(since))
-	q.Add("until", unixMilli(until))
+	//q.Add("analysed", "true") // TODO: may want to turn this off
+	//q.Add("until", unixMilli(until))
 	q.Add("perfType", allSpeeds)
 	q.Add("evals", "true")
 	q.Add("opening", "true")
-	//q.Add("analysed", "true") // TODO: may want to turn this off
 	q.Add("rated", "true")
-	q.Add("max", itoa(max))
-	// moves - Include the PGN moves.
+	if max > 0 {
+		q.Add("max", itoa(max))
+	}
+	q.Add("pgnInJson", "true")
 	// pgnInJson - Include the full PGN within the JSON response, in a pgn field. The response type must be set to  by the request Accept header.
 	// clocks - Include clock comments in the PGN moves, when available.
 	u.RawQuery = q.Encode()
