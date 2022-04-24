@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -39,6 +40,39 @@ type PositionResults struct {
 	Black      int    `json:"black"`
 	Moves      []Move `json:"moves"`
 	TotalGames int    `json:"total_games"`
+}
+
+func GetGames(username string, until time.Time, max int) error {
+	handler := func(ndjson []byte) bool {
+		fmt.Println("===============================================")
+		fmt.Printf("%s\n", ndjson)
+		return true
+	}
+
+	u, err := url.Parse(fmt.Sprintf("https://lichess.org/api/games/user/%s", url.PathEscape(username)))
+	if err != nil {
+		return err
+	}
+	q := u.Query()
+	//q.Add("since", unixMilli(since))
+	q.Add("until", unixMilli(until))
+	q.Add("perfType", allSpeeds)
+	q.Add("evals", "true")
+	q.Add("opening", "true")
+	//q.Add("analysed", "true") // TODO: may want to turn this off
+	q.Add("rated", "true")
+	q.Add("max", itoa(max))
+	// moves - Include the PGN moves.
+	// pgnInJson - Include the full PGN within the JSON response, in a pgn field. The response type must be set to  by the request Accept header.
+	// clocks - Include clock comments in the PGN moves, when available.
+	u.RawQuery = q.Encode()
+
+	endpoint := u.String()
+	if err := ReadStream(endpoint, handler); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func Lookup(fen, play string) (PositionResults, error) {
@@ -114,6 +148,7 @@ func ReadStream(endpoint string, handler func([]byte) bool) error {
 	}
 
 	req.Header.Add("Authorization", AuthToken())
+	req.Header.Add("Accept", "application/x-ndjson")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("http.DefaultClient.Do: '%s' %v", endpoint, err)
@@ -434,4 +469,16 @@ func CancelChallenge(id string) error {
 
 func ts() string {
 	return fmt.Sprintf("[%s]", time.Now().Format("2006-01-02 15:04:05.000"))
+}
+
+func unixMilli(t time.Time) string {
+	return itoa64(t.UnixMilli())
+}
+
+func itoa(a int) string {
+	return strconv.Itoa(a)
+}
+
+func itoa64(a int64) string {
+	return itoa(int(a))
 }

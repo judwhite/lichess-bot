@@ -18,11 +18,19 @@ import (
 )
 
 func main() {
-	analysis()
+	getGames()
+
+	//analysis()
 
 	//positionLookup()
 
 	//runLichessBot()
+}
+
+func getGames() {
+	if err := api.GetGames("TrollololFish", time.Now(), 5); err != nil {
+		log.Fatal(err)
+	}
 }
 
 func positionLookup() {
