@@ -10,6 +10,7 @@ import (
 	"log"
 	"math/rand"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -17,12 +18,14 @@ import (
 
 	"trollfish-lichess/analyze"
 	"trollfish-lichess/api"
+	"trollfish-lichess/fen"
+	"trollfish-lichess/polyglot"
 )
 
 const botID = "trollololfish"
 const startPosFEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
-const maxRating = 3100
-const minRating = 2001
+const maxRating = 4000
+const minRating = 2100
 
 type Listener struct {
 	ctx context.Context
@@ -66,7 +69,7 @@ func New(ctx context.Context, input chan<- string, output <-chan string) *Listen
 	input <- "uci"
 	input <- fmt.Sprintf("setoption name SyzygyPath value %s", analyze.SyzygyPath)
 
-	if err := l.importBook("book.bin"); err != nil {
+	if err := l.importBook("troll.epd"); err != nil {
 		log.Fatal(err)
 	}
 
@@ -88,6 +91,7 @@ func New(ctx context.Context, input chan<- string, output <-chan string) *Listen
 
 func (l *Listener) importBook(filename string) error {
 	fmt.Printf("%s loading book %s...\n", ts(), filename)
+	ext := filepath.Ext(filename)
 
 	fp, err := os.Open(filename)
 	if err != nil {
@@ -95,36 +99,64 @@ func (l *Listener) importBook(filename string) error {
 	}
 	defer fp.Close()
 
-	r := bufio.NewReaderSize(fp, 16384)
-	buf := make([]byte, 32)
-	for {
-		n, err := r.Read(buf)
-		if err == io.EOF {
-			break
-		} else if err != nil {
-			return err
+	if ext == ".bin" {
+		r := bufio.NewReaderSize(fp, 16384)
+		buf := make([]byte, 32)
+		for {
+			n, err := r.Read(buf)
+			if err == io.EOF {
+				break
+			} else if err != nil {
+				return err
+			}
+
+			if n != 32 {
+				log.Fatalf("n=%d, need to do something about this", n)
+			}
+
+			key := (uint64(buf[0]) << (7 * 8)) +
+				(uint64(buf[1]) << (6 * 8)) +
+				(uint64(buf[2]) << (5 * 8)) +
+				(uint64(buf[3]) << (4 * 8)) +
+				(uint64(buf[4]) << (3 * 8)) +
+				(uint64(buf[5]) << (2 * 8)) +
+				(uint64(buf[6]) << (1 * 8)) +
+				uint64(buf[7])
+
+			move := (uint16(buf[8]) << 8) | uint16(buf[9])
+			freq := (uint16(buf[10]) << 8) | uint16(buf[11])
+
+			l.book[key] = append(l.book[key], &BookEntry{Move: move, Freq: freq})
 		}
+	} else if ext == ".epd" {
+		r := bufio.NewScanner(fp)
+		for r.Scan() {
+			line := strings.TrimSpace(r.Text())
+			if len(line) == 0 {
+				continue
+			}
+			sections := strings.Split(line, ";")
+			fenPos := sections[0]
+			for i := 1; i < len(sections); i++ {
+				parts := strings.Split(strings.TrimSpace(sections[i]), " ")
+				if len(parts) != 2 {
+					continue
+				}
+				if parts[0] != "bm_uci" {
+					continue
+				}
+				uci := parts[1]
 
-		if n != 32 {
-			log.Fatalf("n=%d, need to do something about this", n)
+				b := fen.FENtoBoard(fenPos)
+				key := polyglot.Key(b)
+				l.book[key] = append(l.book[key], &BookEntry{Move: 0, Freq: 0, UCIMove: uci})
+			}
 		}
-
-		key := (uint64(buf[0]) << (7 * 8)) +
-			(uint64(buf[1]) << (6 * 8)) +
-			(uint64(buf[2]) << (5 * 8)) +
-			(uint64(buf[3]) << (4 * 8)) +
-			(uint64(buf[4]) << (3 * 8)) +
-			(uint64(buf[5]) << (2 * 8)) +
-			(uint64(buf[6]) << (1 * 8)) +
-			uint64(buf[7])
-
-		move := (uint16(buf[8]) << 8) | uint16(buf[9])
-		freq := (uint16(buf[10]) << 8) | uint16(buf[11])
-
-		l.book[key] = append(l.book[key], &BookEntry{Move: move, Freq: freq})
 	}
 
-	fmt.Printf("%s book loaded. positions: %d\n", ts(), len(l.book))
+	if len(l.book) > 0 {
+		fmt.Printf("%s book loaded. positions: %d\n", ts(), len(l.book))
+	}
 
 	return nil
 }

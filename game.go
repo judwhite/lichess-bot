@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+
 	"trollfish-lichess/api"
 	"trollfish-lichess/fen"
 	"trollfish-lichess/polyglot"
@@ -180,10 +181,6 @@ func (g *Game) handleGameState(ndjson []byte) {
 		log.Fatal(err)
 	}
 
-	if state.WhiteDraw || state.BlackDraw {
-		fmt.Printf("*** wdraw: %v bdraw: %v\n", state.WhiteDraw, state.BlackDraw)
-	}
-
 	if state.Winner != "" {
 		var color string
 		if g.playerNumber == 0 {
@@ -245,9 +242,17 @@ func (g *Game) playMove(ndjson []byte, state api.State) {
 	if ok {
 		n := rand.Intn(len(bookMoves)) // TODO: use freq field
 		bookMove := bookMoves[n]
-		uci := polyglot.ToUCIMove(b, bookMove.Move)
-		bestMove = uci
-		fmt.Printf("%s %s %s came from book\n", b.FEN(), b.UCItoSAN(uci), uci)
+
+		bestMove = bookMove.UCIMove
+		if bestMove == "" {
+			bestMove = polyglot.ToUCIMove(b, bookMove.Move)
+			bookMove.UCIMove = bestMove
+		}
+		if bookMove.FEN == "" {
+			bookMove.FEN = b.FENNoMoveClocks()
+		}
+
+		fmt.Printf("!!! ^^^ !!! ^^^ %s %s %s came from book\n", b.FEN(), b.UCItoSAN(bestMove), bestMove)
 	} else {
 		pos := fmt.Sprintf("position fen %s moves %s", startPosFEN, state.Moves)
 		goCmd := fmt.Sprintf("go wtime %d winc %d btime %d binc %d",
