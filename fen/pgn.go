@@ -1,10 +1,161 @@
 package fen
 
 import (
+	"bufio"
 	"fmt"
+	"os"
+	"sort"
 	"strconv"
 	"strings"
+	"sync"
 )
+
+type Database struct {
+	Games []*Game
+}
+
+type Game struct {
+	Moves []LegalMove
+
+	Positions map[string][]Move
+}
+
+type Move struct {
+	SAN string
+	UCI string
+}
+
+func (g *Game) populatePositions() {
+	if len(g.Moves) == 0 {
+		return
+	}
+
+	var b Board
+	pos := make(map[string][]Move, len(g.Moves))
+
+	b.Moves(g.Moves[0].UCI)
+	for i := 1; i < len(g.Moves); i++ {
+		key := b.FENNoMoveClocks()
+		uci := g.Moves[i].UCI
+
+		//fmt.Printf("fen: '%s' uci: %s i: %d\n", key, uci, i)
+
+		san := b.UCItoSAN(uci)
+
+		pos[key] = append(pos[key], Move{UCI: uci, SAN: san})
+
+		b.Moves(uci)
+	}
+
+	g.Positions = pos
+}
+
+func (db *Database) MostFrequentMove(fen string) string {
+	type moveFreq struct {
+		san  string
+		freq int
+	}
+
+	m := make(map[string]int)
+	for _, game := range db.Games {
+		moves, ok := game.Positions[fen]
+		if !ok {
+			continue
+		}
+
+		for _, move := range moves {
+			m[move.SAN] += 1
+		}
+	}
+
+	var list []moveFreq
+	for k, v := range m {
+		list = append(list, moveFreq{san: k, freq: v})
+	}
+
+	sort.Slice(list, func(i, j int) bool {
+		return list[i].freq > list[j].freq
+	})
+
+	if len(list) == 0 {
+		return "-"
+	}
+
+	return list[0].san
+}
+
+func LoadPGNDatabase(filename string) (Database, error) {
+	var db Database
+
+	fp, err := os.Open(filename)
+	if err != nil {
+		return db, err
+	}
+	defer fp.Close()
+
+	r := bufio.NewScanner(fp)
+
+	var (
+		pgn strings.Builder
+		mtx sync.Mutex
+		wg  sync.WaitGroup
+	)
+
+	addGame := func() error {
+		if pgn.Len() == 0 {
+			return nil
+		}
+
+		s := pgn.String()
+
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			moves, err := PGNtoMoves(s)
+			if err != nil {
+				panic(err)
+			}
+
+			if len(moves) != 0 {
+				game := &Game{Moves: moves}
+				game.populatePositions()
+				mtx.Lock()
+				db.Games = append(db.Games, game)
+				mtx.Unlock()
+			}
+		}()
+
+		pgn.Reset()
+		return nil
+	}
+
+	for r.Scan() {
+		line := strings.TrimSpace(r.Text())
+		if len(line) == 0 {
+			if err := addGame(); err != nil {
+				return db, err
+			}
+			continue
+		}
+
+		if pgn.Len() != 0 {
+			pgn.WriteRune(' ')
+		}
+		pgn.WriteString(line)
+	}
+
+	if err := r.Err(); err != nil {
+		return db, err
+	}
+
+	if err := addGame(); err != nil {
+		return db, err
+	}
+
+	wg.Wait()
+
+	return db, nil
+}
 
 func PGNtoMoves(pgn string) ([]LegalMove, error) {
 	pgn = strings.TrimSpace(pgn)

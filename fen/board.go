@@ -175,7 +175,7 @@ func (b *Board) UCItoSAN(move string) string {
 	isCapture := b.Pos[to] != ' '
 	movedPawn := piece == 'P' || piece == 'p'
 	if piece == ' ' {
-		panic(fmt.Errorf("there is no piece at %d. move: %s fen: %s", from, move, b.FEN()))
+		panic(fmt.Errorf("there is no piece at %d (%s). move: %s fen: %s", from, fromUCI, move, b.FEN()))
 	}
 
 	if to == b.EnPassantSquare && movedPawn {
