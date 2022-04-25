@@ -344,9 +344,6 @@ func TestBoard_UCItoSAN(t *testing.T) {
 
 			if c.want != got {
 				t.Errorf("want: '%s' got: '%s'", c.want, got)
-				//fmt.Printf("... got %s instead.\n", got)
-			} else {
-				//fmt.Printf("OK\n")
 			}
 		})
 	}

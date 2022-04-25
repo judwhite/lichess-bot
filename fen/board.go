@@ -17,6 +17,9 @@ type Board struct {
 	EnPassantSquare int
 	HalfmoveClock   int
 	FullMove        int
+
+	whiteKingIndex int
+	blackKingIndex int
 }
 
 type Color int
@@ -33,6 +36,17 @@ func (c Color) String() string {
 const (
 	WhitePieces Color = 1
 	BlackPieces Color = -1
+
+	whiteKingStartIndex = 60
+	blackKingStartIndex = 4
+	a1                  = 56
+	a8                  = 0
+	c1                  = 58
+	c8                  = 2
+	g1                  = 62
+	g8                  = 6
+	h1                  = 63
+	h8                  = 7
 )
 
 type nav struct {
@@ -77,6 +91,8 @@ var (
 		{file: 0, rank: -1},
 		{file: 0, rank: 1},
 	}
+
+	pawnPaths = []int{-1, 1}
 )
 
 func (b *Board) FENNoMoveClocks() string {
@@ -142,9 +158,9 @@ func (b *Board) FEN() string {
 func (b *Board) UCItoSAN(move string) string {
 	fromUCI := move[:2]
 	toUCI := move[2:4]
-	var promote string
+	var promote byte
 	if len(move) > 4 {
-		promote = strings.ToUpper(string(move[4]))
+		promote = upper(move[4])
 	}
 
 	from, to := uciToIndex(fromUCI), uciToIndex(toUCI)
@@ -157,26 +173,26 @@ func (b *Board) UCItoSAN(move string) string {
 		isCapture = true
 	}
 
-	var san string
+	var san strings.Builder
 
 	if piece == 'K' {
 		switch move {
 		// white
 		case "e1g1":
-			san = "O-O"
+			san.WriteString("O-O")
 		case "e1c1":
-			san = "O-O-O"
+			san.WriteString("O-O-O")
 			// black
 		case "e8g8":
-			san = "O-O"
+			san.WriteString("O-O")
 		case "e8c8":
-			san = "O-O-O"
+			san.WriteString("O-O-O")
 		}
 	}
 
-	if san == "" { // not castling
+	if san.Len() == 0 { // not castling
 		if piece != 'P' {
-			san += string(piece)
+			san.WriteByte(piece)
 		}
 
 		legalMoves := b.legalMoves()
@@ -214,25 +230,26 @@ func (b *Board) UCItoSAN(move string) string {
 			}
 
 			if !sameFile {
-				san += string(fromUCI[0])
+				san.WriteByte(fromUCI[0])
 			} else {
 				if !sameRank {
-					san += string(fromUCI[1])
+					san.WriteByte(fromUCI[1])
 				} else {
-					san += fromUCI
+					san.WriteString(fromUCI)
 				}
 			}
 		}
 
 		if isCapture {
 			if piece == 'P' {
-				san += string(move[0])
+				san.WriteByte(move[0])
 			}
-			san += "x"
+			san.WriteByte('x')
 		}
-		san += toUCI
-		if promote != "" {
-			san += "=" + promote
+		san.WriteString(toUCI)
+		if promote != 0 {
+			san.WriteByte('=')
+			san.WriteByte(promote)
 		}
 	}
 
@@ -241,13 +258,13 @@ func (b *Board) UCItoSAN(move string) string {
 
 	if newBoard.IsCheck() {
 		if newBoard.IsMate() {
-			san += "#"
+			san.WriteByte('#')
 		} else {
-			san += "+"
+			san.WriteByte('+')
 		}
 	}
 
-	return san
+	return san.String()
 }
 
 func (b *Board) checkMoveNotCheck(from, to int) bool {
@@ -293,27 +310,27 @@ func (b *Board) Moves(moves ...string) *Board {
 			promote = upper(move[4])
 		}
 
-		// castling privileges
-		if fromUCI == "a1" || toUCI == "a1" {
-			wq = false
-		} else if fromUCI == "h1" || toUCI == "h1" {
-			wk = false
-		} else if fromUCI == "a8" || toUCI == "a8" {
-			bq = false
-		} else if fromUCI == "h8" || toUCI == "h8" {
-			bk = false
-		} else if fromUCI == "e1" {
-			wk, wq = false, false
-		} else if fromUCI == "e8" {
-			bk, bq = false, false
-		}
-
 		from, to := uciToIndex(fromUCI), uciToIndex(toUCI)
 		piece := b.Pos[from]
 
 		isCapture := b.Pos[to] != ' '
-		b.Pos[to] = b.Pos[from]
+		b.Pos[to] = piece
 		b.Pos[from] = ' '
+
+		// castling privileges
+		if from == a1 || to == a1 {
+			wq = false
+		} else if from == h1 || to == h1 {
+			wk = false
+		} else if from == a8 || to == a8 {
+			bq = false
+		} else if from == h8 || to == h8 {
+			bk = false
+		} else if from == whiteKingStartIndex {
+			wk, wq = false, false
+		} else if from == blackKingStartIndex {
+			bk, bq = false, false
+		}
 
 		if to == b.EnPassantSquare && (piece == 'P' || piece == 'p') {
 			var captureOn int
@@ -356,29 +373,33 @@ func (b *Board) Moves(moves ...string) *Board {
 			}
 		}
 
-		// white king castle
-		if piece == 'K' && fromUCI == "e1" {
-			if toUCI == "g1" {
-				// king side
-				b.Pos[to+1] = ' '
-				b.Pos[to-1] = 'R'
-			} else if toUCI == "c1" {
-				// queen side
-				b.Pos[to-2] = ' '
-				b.Pos[to+1] = 'R'
+		if piece == 'K' {
+			b.whiteKingIndex = to
+			// white king castle
+			if from == whiteKingStartIndex {
+				if to == g1 {
+					// king side
+					b.Pos[to+1] = ' '
+					b.Pos[to-1] = 'R'
+				} else if to == c1 {
+					// queen side
+					b.Pos[to-2] = ' '
+					b.Pos[to+1] = 'R'
+				}
 			}
-		}
-
-		// black king castle
-		if piece == 'k' && fromUCI == "e8" {
-			if toUCI == "g8" {
-				// king side
-				b.Pos[to+1] = ' '
-				b.Pos[to-1] = 'r'
-			} else if toUCI == "c8" {
-				// queen side
-				b.Pos[to-2] = ' '
-				b.Pos[to+1] = 'r'
+		} else if piece == 'k' {
+			b.blackKingIndex = to
+			// black king castle
+			if from == blackKingStartIndex {
+				if to == g8 {
+					// king side
+					b.Pos[to+1] = ' '
+					b.Pos[to-1] = 'r'
+				} else if to == c8 {
+					// queen side
+					b.Pos[to-2] = ' '
+					b.Pos[to+1] = 'r'
+				}
 			}
 		}
 	}
@@ -462,6 +483,11 @@ func FENtoBoard(fen string) Board {
 					offset++
 				}
 			} else {
+				if c == 'K' {
+					b.whiteKingIndex = offset
+				} else if c == 'k' {
+					b.blackKingIndex = offset
+				}
 				b.Pos[offset] = c
 				offset++
 			}
@@ -488,7 +514,6 @@ func atoi(s string) int {
 
 func (b *Board) IsCheck() bool {
 	var (
-		ourKing     byte
 		enemyQueen  byte
 		enemyRook   byte
 		enemyBishop byte
@@ -497,27 +522,21 @@ func (b *Board) IsCheck() bool {
 		enemyKing   byte
 	)
 
-	var white bool
+	var kingIndex, pawnRank int
 	if b.ActiveColor == WhitePieces {
-		ourKing = 'K'
 		enemyKing, enemyQueen, enemyRook, enemyBishop, enemyKnight, enemyPawn = 'k', 'q', 'r', 'b', 'n', 'p'
-		white = true
+		kingIndex = b.whiteKingIndex
+		pawnRank = -1
 	} else {
-		ourKing = 'k'
 		enemyKing, enemyQueen, enemyRook, enemyBishop, enemyKnight, enemyPawn = 'K', 'Q', 'R', 'B', 'N', 'P'
-	}
-
-	// find the king
-	kingIndex := -1
-	for i := 0; i < 64; i++ {
-		if b.Pos[i] == ourKing {
-			kingIndex = i
-			break
-		}
+		kingIndex = b.blackKingIndex
+		pawnRank = 1
 	}
 
 	kingRank := kingIndex / 8
 	kingFile := kingIndex % 8
+
+	pawnRank += kingRank
 
 	// R = same rank or file
 	// B = same diagonal (r +/- n, c +/- n)
@@ -526,16 +545,9 @@ func (b *Board) IsCheck() bool {
 	// N = (r +/- 2, c +/- 1) and (r +/- 1, c +/- 2)
 
 	// pawns
-	var pawnRank int
-	if white {
-		pawnRank = kingRank - 1
-	} else {
-		pawnRank = kingRank + 1
-	}
-
 	if pawnRank >= 0 && pawnRank < 8 {
-		pawnFiles := []int{kingFile - 1, kingFile + 1}
-		for _, pawnFile := range pawnFiles {
+		for _, fileOffset := range pawnPaths {
+			pawnFile := kingFile + fileOffset
 			if pawnFile < 0 || pawnFile >= 8 {
 				continue
 			}
@@ -553,18 +565,19 @@ func (b *Board) IsCheck() bool {
 		file, rank := kingFile+path.file, kingRank+path.rank
 		for file >= 0 && file < 8 && rank >= 0 && rank < 8 {
 			idx := rank*8 + file
-			if b.Pos[idx] == ' ' {
-				file += path.file
-				rank += path.rank
-				continue
-			}
+			c := b.Pos[idx]
 
-			if b.Pos[idx] == enemyBishop || b.Pos[idx] == enemyQueen {
+			if c == enemyBishop || c == enemyQueen {
 				// check by bishop or queen
 				return true
 			}
 
-			break
+			if c != ' ' {
+				break
+			}
+
+			file += path.file
+			rank += path.rank
 		}
 	}
 
@@ -573,18 +586,19 @@ func (b *Board) IsCheck() bool {
 		file, rank := kingFile+path.file, kingRank+path.rank
 		for file >= 0 && file < 8 && rank >= 0 && rank < 8 {
 			idx := rank*8 + file
-			if b.Pos[idx] == ' ' {
-				file += path.file
-				rank += path.rank
-				continue
-			}
+			c := b.Pos[idx]
 
-			if b.Pos[idx] == enemyRook || b.Pos[idx] == enemyQueen {
+			if c == enemyRook || c == enemyQueen {
 				// check by rook or queen
 				return true
 			}
 
-			break
+			if c != ' ' {
+				break
+			}
+
+			file += path.file
+			rank += path.rank
 		}
 	}
 
@@ -628,11 +642,12 @@ func (b *Board) IsMate() bool {
 }
 
 func indexesToUCI(from, to int) string {
-	fromFile := byte('a' + from%8)
-	fromRank := byte('8' - from/8)
-	toFile := byte('a' + to%8)
-	toRank := byte('8' - to/8)
-	return string([]byte{fromFile, fromRank, toFile, toRank})
+	return string([]byte{
+		byte('a' + from%8),
+		byte('8' - from/8),
+		byte('a' + to%8),
+		byte('8' - to/8),
+	})
 }
 
 func indexToSquare(index int) string {
@@ -659,6 +674,8 @@ func (b *Board) Clone() *Board {
 		EnPassantSquare: b.EnPassantSquare,
 		HalfmoveClock:   b.HalfmoveClock,
 		FullMove:        b.FullMove,
+		whiteKingIndex:  b.whiteKingIndex,
+		blackKingIndex:  b.blackKingIndex,
 	}
 	return &newBoard
 }
@@ -730,33 +747,22 @@ func (b *Board) legalMoves() []legalMove {
 }
 
 func (b *Board) isEnemyPiece(p byte) bool {
-	var king, queen, bishop, knight, rook, pawn byte
 	if b.ActiveColor == WhitePieces {
-		king, queen, bishop, knight, rook, pawn = 'k', 'q', 'b', 'n', 'r', 'p'
-	} else {
-		king, queen, bishop, knight, rook, pawn = 'K', 'Q', 'B', 'N', 'R', 'P'
+		return isLower(p)
 	}
-
-	return p == king || p == queen || p == bishop || p == knight || p == rook || p == pawn
+	return isUpper(p)
 }
 
 var (
-	whiteShortCastle    = [3]byte{' ', ' ', 'R'}
-	whiteLongCastle     = [4]byte{'R', ' ', ' ', ' '}
-	blackShortCastle    = [3]byte{' ', ' ', 'r'}
-	blackLongCastle     = [4]byte{'r', ' ', ' ', ' '}
-	whiteKingStartIndex int
-	blackKingStartIndex int
-	fenCastlingMap      = [4]byte{'K', 'Q', 'k', 'q'}
+	whiteShortCastle = [3]byte{' ', ' ', 'R'}
+	whiteLongCastle  = [4]byte{'R', ' ', ' ', ' '}
+	blackShortCastle = [3]byte{' ', ' ', 'r'}
+	blackLongCastle  = [4]byte{'r', ' ', ' ', ' '}
+	fenCastlingMap   = [4]byte{'K', 'Q', 'k', 'q'}
 )
 
-func init() {
-	whiteKingStartIndex = uciToIndex("e1")
-	blackKingStartIndex = uciToIndex("e8")
-}
-
 func (b *Board) kingMoves(idx int) []int {
-	var moves []int
+	moves := make([]int, 0, 8)
 
 	startRank, startFile := indexToRankFile(idx)
 
@@ -972,6 +978,14 @@ func (b *Board) pathMoves(idx int, paths []nav) []int {
 	}
 
 	return moves
+}
+
+func isLower(b byte) bool {
+	return b >= 'a' && b <= 'z'
+}
+
+func isUpper(b byte) bool {
+	return b >= 'A' && b <= 'Z'
 }
 
 func upper(b byte) byte {
