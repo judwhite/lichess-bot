@@ -37,24 +37,39 @@ func PGNtoMoves(pgn string) ([]LegalMove, error) {
 		}
 
 		san := part
-		legalMoves := b.LegalMoves()
+
+		piece := san[0]
+		if piece >= 'a' && piece <= 'h' {
+			piece = 'P'
+		} else if piece == 'O' {
+			piece = 'K'
+		}
+		if b.ActiveColor == BlackPieces {
+			piece = lower(piece)
+		}
+
+		legalMoves := b.PieceLegalMoves(piece)
 		var move LegalMove
 		var uci string
+		var lastUCItoSAN string
 		for _, legalMove := range legalMoves {
-			if legalMove.SAN == san {
-				uci = legalMove.UCI
-				move = legalMove
-				break
+			if legalMove.Piece == piece {
+				lastUCItoSAN = b.UCItoSAN(legalMove.UCI)
+				if lastUCItoSAN == san {
+					uci = legalMove.UCI
+					move = legalMove
+					break
+				}
 			}
 		}
 		if san == "" {
-			return nil, fmt.Errorf("FEN: %s move: %d color: %s want: %s got: empty string", b.FEN(), fullMove, b.ActiveColor, part)
+			return nil, fmt.Errorf("FEN: '%s' full_move: %d color: '%s' want: '%s' got: <empty>", b.FEN(), fullMove, b.ActiveColor, part)
 		}
 		if san != part {
-			return nil, fmt.Errorf("FEN: %s move: %d color: %s want: %s got: %s", b.FEN(), fullMove, b.ActiveColor, part, san)
+			return nil, fmt.Errorf("FEN: '%s' full_move: %d color: '%s' want: '%s' got: '%s'", b.FEN(), fullMove, b.ActiveColor, part, san)
 		}
 		if uci == "" {
-			return nil, fmt.Errorf("FEN: %s move: %d color: %s san: %s uci: empty string move: %v legalMoves: %v", b.FEN(), fullMove, b.ActiveColor, part, move, legalMoves)
+			return nil, fmt.Errorf("FEN: '%s' full_move: %d color: '%s' piece: '%c' san: '%s' uci: <empty> move: %v legalMoves: %v last_san_check: %s", b.FEN(), fullMove, b.ActiveColor, piece, part, move, legalMoves, lastUCItoSAN)
 		}
 		moves = append(moves, move)
 		b.Moves(uci)

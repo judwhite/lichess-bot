@@ -29,16 +29,23 @@ func TestPGNtoMoves(t *testing.T) {
 				return
 			}
 
-			var uciMoves, sanMoves []string
+			// assert
+			var uciMoves []string
 			for _, m := range moves {
 				uciMoves = append(uciMoves, m.UCI)
-				sanMoves = append(sanMoves, m.SAN)
 			}
 
-			// assert
 			if !reflect.DeepEqual(c.UCIMoves, uciMoves) {
 				t.Errorf("\nwant:\n%v\ngot:\n%v", c.UCIMoves, uciMoves)
 			}
+
+			var board Board
+			var sanMoves []string
+			for _, uciMove := range uciMoves {
+				sanMoves = append(sanMoves, board.UCItoSAN(uciMove))
+				board.Moves(uciMove)
+			}
+
 			if !reflect.DeepEqual(c.SANMoves, sanMoves) {
 				t.Errorf("\nwant:\n%v\ngot:\n%v", c.SANMoves, sanMoves)
 			}

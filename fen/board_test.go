@@ -463,7 +463,7 @@ func TestBoard_KingMoves(t *testing.T) {
 	}
 }
 
-func TestBoard_LegalMoves(t *testing.T) {
+func TestBoard_AllLegalMoves(t *testing.T) {
 	cases := []struct {
 		fen  string
 		want []string
@@ -480,13 +480,12 @@ func TestBoard_LegalMoves(t *testing.T) {
 			b := FENtoBoard(c.fen)
 
 			// act
-			legalMoves := b.legalMoves()
+			legalMoves := b.AllLegalMoves()
 
 			// assert
 			var got []string
 			for _, move := range legalMoves {
-				from, to := move.from, move.to
-				uciMove := fmt.Sprintf("%s%s", indexToSquare(from), indexToSquare(to))
+				uciMove := move.UCI
 				san := b.UCItoSAN(uciMove)
 				got = append(got, san)
 			}

@@ -20,6 +20,7 @@ type Board struct {
 
 	whiteKingIndex int
 	blackKingIndex int
+	initialized    bool
 }
 
 type Color int
@@ -96,6 +97,8 @@ var (
 )
 
 func (b *Board) FENNoMoveClocks() string {
+	b.init()
+
 	var fen strings.Builder
 	for i := 0; i < 8; i++ {
 		if i != 0 {
@@ -152,10 +155,14 @@ func (b *Board) FENNoMoveClocks() string {
 }
 
 func (b *Board) FEN() string {
+	b.init()
+
 	return fmt.Sprintf("%s %d %d", b.FENNoMoveClocks(), b.HalfmoveClock, b.FullMove)
 }
 
 func (b *Board) UCItoSAN(move string) string {
+	b.init()
+
 	fromUCI := move[:2]
 	toUCI := move[2:4]
 	var promote byte
@@ -166,23 +173,28 @@ func (b *Board) UCItoSAN(move string) string {
 	from, to := uciToIndex(fromUCI), uciToIndex(toUCI)
 	piece := b.Pos[from]
 	isCapture := b.Pos[to] != ' '
+	movedPawn := piece == 'P' || piece == 'p'
+	if piece == ' ' {
+		panic(fmt.Errorf("there is no piece at %d. move: %s fen: %s", from, move, b.FEN()))
+	}
 
-	piece = upper(piece)
-
-	if to == b.EnPassantSquare && piece == 'P' {
+	if to == b.EnPassantSquare && movedPawn {
 		isCapture = true
 	}
 
 	var san strings.Builder
 
 	if piece == 'K' {
+		// white castling
 		switch move {
-		// white
 		case "e1g1":
 			san.WriteString("O-O")
 		case "e1c1":
 			san.WriteString("O-O-O")
-			// black
+		}
+	} else if piece == 'k' {
+		// black castling
+		switch move {
 		case "e8g8":
 			san.WriteString("O-O")
 		case "e8c8":
@@ -191,11 +203,11 @@ func (b *Board) UCItoSAN(move string) string {
 	}
 
 	if san.Len() == 0 { // not castling
-		if piece != 'P' {
-			san.WriteByte(piece)
+		if !movedPawn {
+			san.WriteByte(upper(piece))
 		}
 
-		legalMoves := b.legalMoves()
+		legalMoves := b.pieceLegalMoves(piece)
 		var otherSources []string
 		for i := 0; i < len(legalMoves); i++ {
 			// check source squares are different
@@ -218,7 +230,7 @@ func (b *Board) UCItoSAN(move string) string {
 			otherSources = append(otherSources, indexToSquare(otherFrom))
 		}
 
-		if len(otherSources) > 0 && piece != 'P' {
+		if len(otherSources) > 0 && !movedPawn {
 			var sameFile, sameRank bool
 			for _, otherFrom := range otherSources {
 				if fromUCI[0] == otherFrom[0] {
@@ -241,7 +253,7 @@ func (b *Board) UCItoSAN(move string) string {
 		}
 
 		if isCapture {
-			if piece == 'P' {
+			if movedPawn {
 				san.WriteByte(move[0])
 			}
 			san.WriteByte('x')
@@ -277,6 +289,8 @@ func (b *Board) checkMoveNotCheck(from, to int) bool {
 }
 
 func (b *Board) Moves(moves ...string) *Board {
+	b.init()
+
 	if len(moves) == 0 {
 		return b
 	}
@@ -421,9 +435,22 @@ func (b *Board) Moves(moves ...string) *Board {
 }
 
 func FENtoBoard(fen string) Board {
+	var b Board
+	b.LoadFEN(fen)
+	return b
+}
+
+func (b *Board) init() {
+	if !b.initialized {
+		b.LoadFEN(startPosFEN)
+	}
+}
+
+func (b *Board) LoadFEN(fen string) {
 	if fen == "" {
 		fen = startPosFEN
 	}
+
 	parts := strings.Split(fen, " ")
 	ranks := strings.Split(parts[0], "/")
 
@@ -464,13 +491,12 @@ func FENtoBoard(fen string) Board {
 		epSquare = uciToIndex(parts[3])
 	}
 
-	b := Board{
-		ActiveColor:     activeColor,
-		Castling:        [4]bool{wk, wq, bk, bq},
-		EnPassantSquare: epSquare,
-		HalfmoveClock:   atoi(parts[4]),
-		FullMove:        atoi(parts[5]),
-	}
+	b.ActiveColor = activeColor
+	b.Castling = [4]bool{wk, wq, bk, bq}
+	b.EnPassantSquare = epSquare
+	b.HalfmoveClock = atoi(parts[4])
+	b.FullMove = atoi(parts[5])
+	b.initialized = true
 
 	for i := 7; i >= 0; i-- {
 		rank := []byte(ranks[i])
@@ -493,8 +519,6 @@ func FENtoBoard(fen string) Board {
 			}
 		}
 	}
-
-	return b
 }
 
 func uciToIndex(uci string) int {
@@ -513,6 +537,8 @@ func atoi(s string) int {
 }
 
 func (b *Board) IsCheck() bool {
+	b.init()
+
 	var (
 		enemyQueen  byte
 		enemyRook   byte
@@ -634,11 +660,13 @@ func (b *Board) IsCheck() bool {
 }
 
 func (b *Board) IsMate() bool {
+	b.init()
+
 	if !b.IsCheck() {
 		return false
 	}
 
-	return len(b.LegalMoves()) == 0
+	return len(b.pieceLegalMoves(0)) == 0
 }
 
 func indexesToUCI(from, to int) string {
@@ -667,7 +695,9 @@ func indexToRankFile(index int) (int, int) {
 }
 
 func (b *Board) Clone() *Board {
-	newBoard := Board{
+	b.init()
+
+	return &Board{
 		Pos:             b.Pos,
 		ActiveColor:     b.ActiveColor,
 		Castling:        b.Castling,
@@ -676,13 +706,19 @@ func (b *Board) Clone() *Board {
 		FullMove:        b.FullMove,
 		whiteKingIndex:  b.whiteKingIndex,
 		blackKingIndex:  b.blackKingIndex,
+		initialized:     b.initialized,
 	}
-	return &newBoard
 }
 
 type LegalMove struct {
-	SAN string
-	UCI string
+	Piece byte
+	From  string
+	To    string
+	UCI   string
+}
+
+func (lm LegalMove) String() string {
+	return fmt.Sprintf("{san-approx: %c%s piece: %c uci: %s}", upper(lm.Piece), lm.To, lm.Piece, lm.UCI)
 }
 
 type legalMove struct {
@@ -690,26 +726,29 @@ type legalMove struct {
 	to   int
 }
 
-func (b *Board) LegalMoves() []LegalMove {
-	moves := b.legalMoves()
+func (b *Board) PieceLegalMoves(piece byte) []LegalMove {
+	b.init()
+
+	moves := b.pieceLegalMoves(piece)
 	sanMoves := make([]LegalMove, 0, len(moves)+4)
 	for _, m := range moves {
-		uci := indexToSquare(m.from) + indexToSquare(m.to)
+		from, to := indexToSquare(m.from), indexToSquare(m.to)
+		uci := from + to
 		p := b.Pos[m.from]
 		if (p == 'p' && m.to >= 56) || (p == 'P' && m.to < 8) {
 			for _, promote := range []string{"n", "b", "r", "q"} {
 				promoteUCI := uci + promote
-				sanMoves = append(sanMoves, LegalMove{UCI: promoteUCI, SAN: b.UCItoSAN(promoteUCI)})
+				sanMoves = append(sanMoves, LegalMove{Piece: p, From: from, To: to, UCI: promoteUCI})
 			}
 		} else {
-			sanMoves = append(sanMoves, LegalMove{UCI: uci, SAN: b.UCItoSAN(uci)})
+			sanMoves = append(sanMoves, LegalMove{Piece: p, From: from, To: to, UCI: uci})
 		}
 	}
 
 	return sanMoves
 }
 
-func (b *Board) legalMoves() []legalMove {
+func (b *Board) pieceLegalMoves(piece byte) []legalMove {
 	var king, queen, bishop, knight, rook, pawn byte
 	if b.ActiveColor == WhitePieces {
 		king, queen, bishop, knight, rook, pawn = 'K', 'Q', 'B', 'N', 'R', 'P'
@@ -720,6 +759,10 @@ func (b *Board) legalMoves() []legalMove {
 	var moves []legalMove
 
 	for i := 0; i < 64; i++ {
+		if piece != 0 && piece != b.Pos[i] {
+			continue
+		}
+
 		var pieceMoves []int
 		switch b.Pos[i] {
 		case king:
@@ -744,6 +787,12 @@ func (b *Board) legalMoves() []legalMove {
 	}
 
 	return moves
+}
+
+func (b *Board) AllLegalMoves() []LegalMove {
+	b.init()
+
+	return b.PieceLegalMoves(0)
 }
 
 func (b *Board) isEnemyPiece(p byte) bool {
