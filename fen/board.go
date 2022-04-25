@@ -1,9 +1,9 @@
 package fen
 
 import (
+	"bytes"
 	"fmt"
 	"log"
-	"math"
 	"strconv"
 	"strings"
 )
@@ -12,29 +12,28 @@ const startPosFEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
 
 type Board struct {
 	Pos             [64]byte
-	ActiveColor     string
-	Castling        string
-	EnPassantSquare string
-	HalfmoveClock   string
-	FullMove        string
+	ActiveColor     Color
+	Castling        [4]bool
+	EnPassantSquare int
+	HalfmoveClock   int
+	FullMove        int
 }
 
 type Color int
+
+func (c Color) String() string {
+	if c == WhitePieces {
+		return "w"
+	} else if c == BlackPieces {
+		return "b"
+	}
+	return "?"
+}
 
 const (
 	WhitePieces Color = 1
 	BlackPieces Color = -1
 )
-
-func (b *Board) ActivePlayer() Color {
-	if b.ActiveColor == "w" {
-		return WhitePieces
-	} else if b.ActiveColor == "b" {
-		return BlackPieces
-	}
-	log.Fatalf("unhandled ActiveColor '%s'", b.ActiveColor)
-	return math.MinInt64
-}
 
 type nav struct {
 	file int
@@ -83,8 +82,8 @@ var (
 func (b *Board) FENNoMoveClocks() string {
 	var fen strings.Builder
 	for i := 0; i < 8; i++ {
-		if fen.Len() != 0 {
-			fen.WriteRune('/')
+		if i != 0 {
+			fen.WriteByte('/')
 		}
 
 		offset := i * 8
@@ -97,7 +96,7 @@ func (b *Board) FENNoMoveClocks() string {
 			}
 
 			if blanks != 0 {
-				fen.WriteString(fmt.Sprintf("%d", blanks))
+				fen.WriteByte('0' + byte(blanks))
 				blanks = 0
 			}
 
@@ -105,18 +104,39 @@ func (b *Board) FENNoMoveClocks() string {
 		}
 
 		if blanks != 0 {
-			fen.WriteString(fmt.Sprintf("%d", blanks))
+			fen.WriteByte('0' + byte(blanks))
 			blanks = 0
 		}
 	}
 
-	fen.WriteString(fmt.Sprintf(" %s %s %s", b.ActiveColor, b.Castling, b.EnPassantSquare))
+	// active color
+	if b.ActiveColor == WhitePieces {
+		fen.WriteString(" w ")
+	} else {
+		fen.WriteString(" b ")
+	}
+
+	// castling
+	var anyCastling bool
+	for i := 0; i < 4; i++ {
+		if b.Castling[i] {
+			fen.WriteByte(fenCastlingMap[i])
+			anyCastling = true
+		}
+	}
+	if !anyCastling {
+		fen.WriteByte('-')
+	}
+	fen.WriteByte(' ')
+
+	// en passant target square
+	fen.WriteString(indexToSquare(b.EnPassantSquare))
 
 	return fen.String()
 }
 
 func (b *Board) FEN() string {
-	return fmt.Sprintf("%s %s %s", b.FENNoMoveClocks(), b.HalfmoveClock, b.FullMove)
+	return fmt.Sprintf("%s %d %d", b.FENNoMoveClocks(), b.HalfmoveClock, b.FullMove)
 }
 
 func (b *Board) UCItoSAN(move string) string {
@@ -133,7 +153,7 @@ func (b *Board) UCItoSAN(move string) string {
 
 	piece = upper(piece)
 
-	if toUCI == b.EnPassantSquare && piece == 'P' {
+	if to == b.EnPassantSquare && piece == 'P' {
 		isCapture = true
 	}
 
@@ -231,7 +251,7 @@ func (b *Board) UCItoSAN(move string) string {
 }
 
 func (b *Board) checkMoveNotCheck(from, to int) bool {
-	uci := fmt.Sprintf("%s%s", indexToSquare(from), indexToSquare(to))
+	uci := indexesToUCI(from, to)
 	activeColor := b.ActiveColor
 	newBoard := b.Clone()
 	newBoard.Moves(uci)
@@ -244,34 +264,22 @@ func (b *Board) Moves(moves ...string) *Board {
 		return b
 	}
 
-	halfMoveClock := atoi(b.HalfmoveClock)
-	fullMove := atoi(b.FullMove)
+	halfMoveClock := b.HalfmoveClock
+	fullMove := b.FullMove
 
-	var activeColor int
-	if b.ActivePlayer() == BlackPieces {
-		activeColor = 1
-	}
+	activeColor := b.ActiveColor
 
-	var wk, wq, bk, bq bool
-	for _, c := range b.Castling {
-		switch c {
-		case 'K':
-			wk = true
-		case 'Q':
-			wq = true
-		case 'k':
-			bk = true
-		case 'q':
-			bq = true
-		}
-	}
+	wk := b.Castling[0]
+	wq := b.Castling[1]
+	bk := b.Castling[2]
+	bq := b.Castling[3]
 
 	for moveIdx, move := range moves {
-		if activeColor == 1 {
-			activeColor = 0
+		if activeColor == BlackPieces {
+			activeColor = WhitePieces
 			fullMove++
 		} else {
-			activeColor = 1
+			activeColor = BlackPieces
 		}
 
 		if len(move) < 4 {
@@ -307,9 +315,9 @@ func (b *Board) Moves(moves ...string) *Board {
 		b.Pos[to] = b.Pos[from]
 		b.Pos[from] = ' '
 
-		if toUCI == b.EnPassantSquare && (piece == 'P' || piece == 'p') {
+		if to == b.EnPassantSquare && (piece == 'P' || piece == 'p') {
 			var captureOn int
-			if activeColor == 0 {
+			if activeColor == WhitePieces {
 				captureOn = to - 8 // next move is white's, so the target is in black's position
 			} else {
 				captureOn = to + 8
@@ -319,17 +327,17 @@ func (b *Board) Moves(moves ...string) *Board {
 		}
 
 		// set halfmove clock and en passant square
-		b.EnPassantSquare = "-"
+		b.EnPassantSquare = -1
 		if piece == 'P' || piece == 'p' {
 			halfMoveClock = 0
-			if int(math.Abs(float64(to-from))) == 16 {
-				var file rune
-				if activeColor == 0 {
-					file = '6' // next move is white's, so the target is in black's position
+			if abs(to-from) == 16 {
+				var internalFile int
+				if activeColor == WhitePieces {
+					internalFile = 2 // next move is white's, so the target is in black's position
 				} else {
-					file = '3'
+					internalFile = 5
 				}
-				b.EnPassantSquare = fmt.Sprintf("%c%c", 'a'+to%8, file)
+				b.EnPassantSquare = to%8 + internalFile*8
 			}
 		} else {
 			if isCapture {
@@ -341,7 +349,7 @@ func (b *Board) Moves(moves ...string) *Board {
 
 		// promotion
 		if promote != 0 {
-			if activeColor == 0 {
+			if activeColor == WhitePieces { // next move is white's, so black promotes
 				b.Pos[to] = lower(promote)
 			} else {
 				b.Pos[to] = upper(promote)
@@ -375,36 +383,18 @@ func (b *Board) Moves(moves ...string) *Board {
 		}
 	}
 
-	if activeColor == 0 {
-		b.ActiveColor = "w"
-	} else {
-		b.ActiveColor = "b"
-	}
+	b.ActiveColor = activeColor
 
 	// castling
-	var cstl strings.Builder
-	if wk {
-		cstl.WriteRune('K')
-	}
-	if wq {
-		cstl.WriteRune('Q')
-	}
-	if bk {
-		cstl.WriteRune('k')
-	}
-	if bq {
-		cstl.WriteRune('q')
-	}
-	if cstl.Len() == 0 {
-		b.Castling = "-"
-	} else {
-		b.Castling = cstl.String()
-	}
+	b.Castling[0] = wk
+	b.Castling[1] = wq
+	b.Castling[2] = bk
+	b.Castling[3] = bq
 
 	// NOTE: en passant target square handling per move
 
-	b.HalfmoveClock = fmt.Sprintf("%d", halfMoveClock)
-	b.FullMove = fmt.Sprintf("%d", fullMove)
+	b.HalfmoveClock = halfMoveClock
+	b.FullMove = fullMove
 
 	return b
 }
@@ -423,12 +413,42 @@ func FENtoBoard(fen string) Board {
 		parts = append(parts, "1")
 	}
 
+	// active color
+	var activeColor Color
+	if parts[1] == "w" {
+		activeColor = WhitePieces
+	} else if parts[1] == "b" {
+		activeColor = BlackPieces
+	} else {
+		log.Fatalf("active color '%s' is invalid", parts[1])
+	}
+
+	var wk, wq, bk, bq bool
+	for _, c := range parts[2] {
+		switch c {
+		case 'K':
+			wk = true
+		case 'Q':
+			wq = true
+		case 'k':
+			bk = true
+		case 'q':
+			bq = true
+		}
+	}
+
+	// en passant target square
+	epSquare := -1
+	if parts[3] != "-" {
+		epSquare = uciToIndex(parts[3])
+	}
+
 	b := Board{
-		ActiveColor:     parts[1],
-		Castling:        parts[2],
-		EnPassantSquare: parts[3],
-		HalfmoveClock:   parts[4],
-		FullMove:        parts[5],
+		ActiveColor:     activeColor,
+		Castling:        [4]bool{wk, wq, bk, bq},
+		EnPassantSquare: epSquare,
+		HalfmoveClock:   atoi(parts[4]),
+		FullMove:        atoi(parts[5]),
 	}
 
 	for i := 7; i >= 0; i-- {
@@ -478,7 +498,7 @@ func (b *Board) IsCheck() bool {
 	)
 
 	var white bool
-	if b.ActivePlayer() == WhitePieces {
+	if b.ActiveColor == WhitePieces {
 		ourKing = 'K'
 		enemyKing, enemyQueen, enemyRook, enemyBishop, enemyKnight, enemyPawn = 'k', 'q', 'r', 'b', 'n', 'p'
 		white = true
@@ -607,10 +627,22 @@ func (b *Board) IsMate() bool {
 	return len(b.LegalMoves()) == 0
 }
 
+func indexesToUCI(from, to int) string {
+	fromFile := byte('a' + from%8)
+	fromRank := byte('8' - from/8)
+	toFile := byte('a' + to%8)
+	toRank := byte('8' - to/8)
+	return string([]byte{fromFile, fromRank, toFile, toRank})
+}
+
 func indexToSquare(index int) string {
-	file := 'a' + index%8
-	rank := 8 - index/8
-	return fmt.Sprintf("%c%d", file, rank)
+	if index == -1 {
+		return "-"
+	}
+
+	file := byte('a' + index%8)
+	rank := byte('8' - index/8)
+	return string([]byte{file, rank})
 }
 
 func indexToRankFile(index int) (int, int) {
@@ -621,13 +653,13 @@ func indexToRankFile(index int) (int, int) {
 
 func (b *Board) Clone() *Board {
 	newBoard := Board{
+		Pos:             b.Pos,
 		ActiveColor:     b.ActiveColor,
 		Castling:        b.Castling,
 		EnPassantSquare: b.EnPassantSquare,
 		HalfmoveClock:   b.HalfmoveClock,
 		FullMove:        b.FullMove,
 	}
-	copy(newBoard.Pos[:], b.Pos[:])
 	return &newBoard
 }
 
@@ -662,7 +694,7 @@ func (b *Board) LegalMoves() []LegalMove {
 
 func (b *Board) legalMoves() []legalMove {
 	var king, queen, bishop, knight, rook, pawn byte
-	if b.ActivePlayer() == WhitePieces {
+	if b.ActiveColor == WhitePieces {
 		king, queen, bishop, knight, rook, pawn = 'K', 'Q', 'B', 'N', 'R', 'P'
 	} else {
 		king, queen, bishop, knight, rook, pawn = 'k', 'q', 'b', 'n', 'r', 'p'
@@ -699,13 +731,28 @@ func (b *Board) legalMoves() []legalMove {
 
 func (b *Board) isEnemyPiece(p byte) bool {
 	var king, queen, bishop, knight, rook, pawn byte
-	if b.ActivePlayer() == WhitePieces {
+	if b.ActiveColor == WhitePieces {
 		king, queen, bishop, knight, rook, pawn = 'k', 'q', 'b', 'n', 'r', 'p'
 	} else {
 		king, queen, bishop, knight, rook, pawn = 'K', 'Q', 'B', 'N', 'R', 'P'
 	}
 
 	return p == king || p == queen || p == bishop || p == knight || p == rook || p == pawn
+}
+
+var (
+	whiteShortCastle    = [3]byte{' ', ' ', 'R'}
+	whiteLongCastle     = [4]byte{'R', ' ', ' ', ' '}
+	blackShortCastle    = [3]byte{' ', ' ', 'r'}
+	blackLongCastle     = [4]byte{'r', ' ', ' ', ' '}
+	whiteKingStartIndex int
+	blackKingStartIndex int
+	fenCastlingMap      = [4]byte{'K', 'Q', 'k', 'q'}
+)
+
+func init() {
+	whiteKingStartIndex = uciToIndex("e1")
+	blackKingStartIndex = uciToIndex("e8")
 }
 
 func (b *Board) kingMoves(idx int) []int {
@@ -730,62 +777,44 @@ func (b *Board) kingMoves(idx int) []int {
 	}
 
 	// castling options
-	var castling []rune
-	maybeAdd := func(types ...rune) {
-		if b.IsCheck() {
-			return
-		}
+	var canCastleShort, canCastleLong bool
+	var castleShortPattern [3]byte
+	var castleLongPattern [4]byte
+	var fileOffset int
 
-		for _, r := range types {
-			if strings.ContainsRune(b.Castling, r) {
-				castling = append(castling, r)
-			}
+	if b.ActiveColor == WhitePieces && idx == whiteKingStartIndex {
+		fileOffset = 56
+		canCastleShort, canCastleLong = b.Castling[0], b.Castling[1]
+		castleShortPattern = whiteShortCastle
+		castleLongPattern = whiteLongCastle
+	} else if b.ActiveColor == BlackPieces && idx == blackKingStartIndex {
+		fileOffset = 0
+		canCastleShort, canCastleLong = b.Castling[2], b.Castling[3]
+		castleShortPattern = blackShortCastle
+		castleLongPattern = blackLongCastle
+	}
+
+	canCastleLong = canCastleLong && bytes.Equal(b.Pos[fileOffset:fileOffset+4], castleLongPattern[:])
+	canCastleShort = canCastleShort && bytes.Equal(b.Pos[fileOffset+5:fileOffset+8], castleShortPattern[:])
+
+	if (canCastleShort || canCastleLong) && b.IsCheck() {
+		canCastleShort, canCastleLong = false, false
+	}
+
+	if canCastleShort {
+		toIndex := idx + 2
+		inbetweenSquare := toIndex - 1
+		if b.checkMoveNotCheck(idx, inbetweenSquare) {
+			moves = append(moves, toIndex)
 		}
 	}
-	if b.ActivePlayer() == WhitePieces && idx == uciToIndex("e1") {
-		maybeAdd('K', 'Q')
-	} else if b.ActivePlayer() == BlackPieces && idx == uciToIndex("e8") {
-		maybeAdd('k', 'q')
-	}
 
-	for _, castlingType := range castling {
-		var (
-			toIndex         int
-			inbetweenSquare int
-		)
-
-		switch castlingType {
-		case 'K':
-			if b.Pos[56+5] != ' ' || b.Pos[56+6] != ' ' || b.Pos[56+7] != 'R' {
-				continue
-			}
-			toIndex = uciToIndex("g1")
-			inbetweenSquare = toIndex - 1
-		case 'Q':
-			if b.Pos[56+0] != 'R' || b.Pos[56+1] != ' ' || b.Pos[56+2] != ' ' || b.Pos[56+3] != ' ' {
-				continue
-			}
-			toIndex = uciToIndex("c1")
-			inbetweenSquare = toIndex + 1
-		case 'k':
-			if b.Pos[5] != ' ' || b.Pos[6] != ' ' || b.Pos[7] != 'r' {
-				continue
-			}
-			toIndex = uciToIndex("g8")
-			inbetweenSquare = toIndex - 1
-		case 'q':
-			if b.Pos[0] != 'r' || b.Pos[1] != ' ' || b.Pos[2] != ' ' || b.Pos[3] != ' ' {
-				continue
-			}
-			toIndex = uciToIndex("c8")
-			inbetweenSquare = toIndex + 1
+	if canCastleLong {
+		toIndex := idx - 2
+		inbetweenSquare := toIndex + 1
+		if b.checkMoveNotCheck(idx, inbetweenSquare) {
+			moves = append(moves, toIndex)
 		}
-
-		if !b.checkMoveNotCheck(idx, inbetweenSquare) {
-			continue
-		}
-
-		moves = append(moves, toIndex)
 	}
 
 	for i := 0; i < len(moves); i++ {
@@ -846,7 +875,7 @@ func (b *Board) pawnMoves(idx int) []int {
 	var moves []int
 
 	var direction, homeRank int
-	if b.ActivePlayer() == WhitePieces {
+	if b.ActiveColor == WhitePieces {
 		direction = -1
 		homeRank = 6
 	} else {
@@ -880,11 +909,7 @@ func (b *Board) pawnMoves(idx int) []int {
 
 	// captures
 	rank = startRank + direction
-
-	enPassantIndex := -1
-	if b.EnPassantSquare != "-" {
-		enPassantIndex = uciToIndex(b.EnPassantSquare)
-	}
+	enPassantIndex := b.EnPassantSquare
 
 	for _, fileChange := range []int{-1, 1} {
 		file := startFile + fileChange
@@ -965,4 +990,11 @@ func lower(b byte) byte {
 
 func isDigit(b byte) bool {
 	return b >= '0' && b <= '9'
+}
+
+func abs(n int) int {
+	if n < 0 {
+		return -n
+	}
+	return n
 }

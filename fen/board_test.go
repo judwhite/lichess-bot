@@ -13,20 +13,20 @@ func TestFENtoBoard(t *testing.T) {
 	// arrange
 	cases := []struct {
 		fen                 string
-		wantActiveColor     string
-		wantCastling        string
-		wantEnPassantSquare string
-		wantHalfMoveClock   string
-		wantFullMove        string
+		wantActiveColor     Color
+		wantCastling        [4]bool
+		wantEnPassantSquare int
+		wantHalfMoveClock   int
+		wantFullMove        int
 		wantPos             []byte
 	}{
 		{
 			fen:                 "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
-			wantActiveColor:     "w",
-			wantCastling:        "KQkq",
-			wantEnPassantSquare: "-",
-			wantHalfMoveClock:   "0",
-			wantFullMove:        "1",
+			wantActiveColor:     WhitePieces,
+			wantCastling:        [4]bool{true, true, true, true},
+			wantEnPassantSquare: -1,
+			wantHalfMoveClock:   0,
+			wantFullMove:        1,
 			wantPos: []byte{
 				'r', 'n', 'b', 'q', 'k', 'b', 'n', 'r',
 				'p', 'p', 'p', 'p', 'p', 'p', 'p', 'p',
@@ -40,11 +40,11 @@ func TestFENtoBoard(t *testing.T) {
 		},
 		{
 			fen:                 "r1b1kbnr/pppp1ppp/2n5/4P3/1q6/5N2/PPPBPPPP/RN1QKB1R b KQkq - 6 5",
-			wantActiveColor:     "b",
-			wantCastling:        "KQkq",
-			wantEnPassantSquare: "-",
-			wantHalfMoveClock:   "6",
-			wantFullMove:        "5",
+			wantActiveColor:     BlackPieces,
+			wantCastling:        [4]bool{true, true, true, true},
+			wantEnPassantSquare: -1,
+			wantHalfMoveClock:   6,
+			wantFullMove:        5,
 			wantPos: []byte{
 				'r', ' ', 'b', ' ', 'k', 'b', 'n', 'r',
 				'p', 'p', 'p', 'p', ' ', 'p', 'p', 'p',
@@ -119,16 +119,16 @@ func TestFENtoBoard(t *testing.T) {
 				t.Errorf("ActiveColor, want: '%s' got: '%s'", c.wantActiveColor, board.ActiveColor)
 			}
 			if board.Castling != c.wantCastling {
-				t.Errorf("Castling, want: '%s' got: '%s'", c.wantCastling, board.Castling)
+				t.Errorf("Castling, want: '%v' got: '%v'", c.wantCastling, board.Castling)
 			}
 			if board.EnPassantSquare != c.wantEnPassantSquare {
-				t.Errorf("EnPassantSquare, want: '%s' got: '%s'", c.wantEnPassantSquare, board.EnPassantSquare)
+				t.Errorf("EnPassantSquare, want: '%d' got: '%d'", c.wantEnPassantSquare, board.EnPassantSquare)
 			}
 			if board.HalfmoveClock != c.wantHalfMoveClock {
-				t.Errorf("HalfmoveClock, want: '%s' got: '%s'", c.wantHalfMoveClock, board.HalfmoveClock)
+				t.Errorf("HalfmoveClock, want: '%v' got: '%v'", c.wantHalfMoveClock, board.HalfmoveClock)
 			}
 			if board.FullMove != c.wantFullMove {
-				t.Errorf("FullMove, want: '%s' got: '%s'", c.wantFullMove, board.FullMove)
+				t.Errorf("FullMove, want: '%v' got: '%v'", c.wantFullMove, board.FullMove)
 			}
 		})
 	}

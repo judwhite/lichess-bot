@@ -53,6 +53,9 @@ func PGNtoMoves(pgn string) ([]LegalMove, error) {
 		if san != part {
 			return nil, fmt.Errorf("FEN: %s move: %d color: %s want: %s got: %s", b.FEN(), fullMove, b.ActiveColor, part, san)
 		}
+		if uci == "" {
+			return nil, fmt.Errorf("FEN: %s move: %d color: %s san: %s uci: empty string move: %v legalMoves: %v", b.FEN(), fullMove, b.ActiveColor, part, move, legalMoves)
+		}
 		moves = append(moves, move)
 		b.Moves(uci)
 	}

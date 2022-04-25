@@ -10,7 +10,7 @@ func Key(board fen.Board) uint64 {
 	piece := pieceKey(board.Pos)
 	castle := castleKey(board.Castling)
 	ep := enPassantKey(board.Pos, board.EnPassantSquare)
-	turn := turnKey(board.ActivePlayer())
+	turn := turnKey(board.ActiveColor)
 
 	return piece ^ castle ^ ep ^ turn
 }
@@ -35,35 +35,34 @@ func pieceKey(pos [64]byte) uint64 {
 	return key
 }
 
-func castleKey(castling string) uint64 {
+func castleKey(castling [4]bool) uint64 {
 	var key uint64
 
-	for _, r := range castling {
-		switch r {
-		case 'K':
-			key ^= pgTable[castleKeyOffset]
-		case 'Q':
-			key ^= pgTable[castleKeyOffset+1]
-		case 'k':
-			key ^= pgTable[castleKeyOffset+2]
-		case 'q':
-			key ^= pgTable[castleKeyOffset+3]
-		}
+	if castling[0] { // K
+		key ^= pgTable[castleKeyOffset]
+	}
+	if castling[1] { // Q
+		key ^= pgTable[castleKeyOffset+1]
+	}
+	if castling[2] { // k
+		key ^= pgTable[castleKeyOffset+2]
+	}
+	if castling[3] { // q
+		key ^= pgTable[castleKeyOffset+3]
 	}
 
 	return key
 }
 
-func enPassantKey(pos [64]byte, square string) uint64 {
-	if square == "" || square == "-" {
+func enPassantKey(pos [64]byte, idx int) uint64 {
+	if idx == -1 {
 		return 0
 	}
 
-	idx := uciToIndex(square)
-	file := int(square[0]) - 'a'
+	humanRank, humanFile := indexToHumanRankFile(idx)
 	var flag bool
 	var enemyPiece byte
-	if square[1] == '6' {
+	if humanRank == 6 {
 		// black pushed
 		idx += 8
 		enemyPiece = 'P'
@@ -73,12 +72,12 @@ func enPassantKey(pos [64]byte, square string) uint64 {
 		enemyPiece = 'p'
 	}
 
-	if file != 0 {
+	if humanFile != 1 {
 		if pos[idx-1] == enemyPiece {
 			flag = true
 		}
 	}
-	if file != 7 {
+	if humanFile != 8 {
 		if pos[idx+1] == enemyPiece {
 			flag = true
 		}
@@ -88,7 +87,7 @@ func enPassantKey(pos [64]byte, square string) uint64 {
 		return 0
 	}
 
-	return pgTable[enPassantKeyOffset+file]
+	return pgTable[enPassantKeyOffset+humanFile-1]
 }
 
 func turnKey(color fen.Color) uint64 {
@@ -99,9 +98,8 @@ func turnKey(color fen.Color) uint64 {
 	return pgTable[turnKeyOffset]
 }
 
-func uciToIndex(uci string) int {
-	file := int(uci[0]) - 'a'
-	rank := int(uci[1]) - '0' - 1
-	idx := (7-rank)*8 + file
-	return idx
+func indexToHumanRankFile(index int) (int, int) {
+	file := (index % 8) + 1
+	rank := 8 - (index / 8)
+	return rank, file
 }

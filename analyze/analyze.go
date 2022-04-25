@@ -650,7 +650,7 @@ func (a *Analyzer) analyzePosition(ctx context.Context, fenPos string, ply, tota
 	curDepth := 0
 	logInfo("")
 	newestEvals := maxDepthEvals(evals)
-	player := board.ActivePlayer()
+	player := board.ActiveColor
 	var bestMoveAtDepth Eval
 	for _, eval := range evals {
 		san := board.UCItoSAN(eval.UCIMove)
@@ -876,8 +876,8 @@ func writeVariation(sb *strings.Builder, board *fen.Board, eval Eval, annotation
 
 	used := 6
 
-	basePly := (atoi(board.FullMove) - 1) * 2
-	if board.ActivePlayer() == fen.BlackPieces {
+	basePly := (board.FullMove - 1) * 2
+	if board.ActiveColor == fen.BlackPieces {
 		basePly++
 	}
 
