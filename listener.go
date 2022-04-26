@@ -226,7 +226,7 @@ func (l *Listener) Events() error {
 
 			l.activeGameMtx.Lock()
 			if l.activeGame != nil && l.activeGame.gameID == gameEvent.Game.ID {
-				l.activeGame.Finish(gameEvent)
+				l.activeGame.Finish()
 			}
 			l.activeGameMtx.Unlock()
 			return !l.Quit()

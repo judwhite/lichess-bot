@@ -31,7 +31,8 @@ type Game struct {
 	input  chan<- string
 	output <-chan string
 
-	book map[uint64][]*BookEntry
+	book            map[uint64][]*BookEntry
+	bookMovesPlayed int
 }
 
 func NewGame(gameID string, input chan<- string, output <-chan string, book map[uint64][]*BookEntry) *Game {
@@ -73,9 +74,10 @@ func (g *Game) StreamGameEvents() {
 	}
 }
 
-func (g *Game) Finish(gameEvent api.GameEvent) {
+func (g *Game) Finish() {
 	g.Lock()
 	g.finished = true
+	fmt.Printf("%d book move(s) played\n", g.bookMovesPlayed)
 	g.Unlock()
 }
 
@@ -253,6 +255,7 @@ func (g *Game) playMove(ndjson []byte, state api.State) {
 		}
 
 		fmt.Printf("!!! ^^^ !!! ^^^ %s %s %s came from book\n", b.FEN(), b.UCItoSAN(bestMove), bestMove)
+		g.bookMovesPlayed++
 	} else {
 		pos := fmt.Sprintf("position fen %s moves %s", startPosFEN, state.Moves)
 		goCmd := fmt.Sprintf("go wtime %d winc %d btime %d binc %d",
@@ -287,7 +290,7 @@ func (g *Game) playMove(ndjson []byte, state api.State) {
 			// TODO: we should handle the opponent resigning, flagging or aborting while we're thinking
 			fmt.Printf("*** ERR: api.PlayMove: %v: %s\n", err, string(ndjson))
 
-			g.finished = true
+			g.Finish()
 			return
 		}
 
