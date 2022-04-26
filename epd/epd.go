@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -52,8 +53,15 @@ func (f *File) Add(fenKey string, ops ...Operation) {
 	line.RawText = line.String()
 }
 
-func (f *File) Save(filename string) error {
+func (f *File) Save(filename string, backup bool) error {
 	b := []byte(f.String())
+	if backup && fileExists(filename) {
+		ext := filepath.Ext(filename)
+		backupFilename := fmt.Sprintf("%s-%d%s.backup", strings.TrimSuffix(filename, ext), time.Now().UnixMilli(), ext)
+		if err := os.Rename(filename, backupFilename); err != nil {
+			return fmt.Errorf("error creating backup file '%s': %v", backupFilename, err)
+		}
+	}
 	if err := ioutil.WriteFile(filename, b, 0644); err != nil {
 		return fmt.Errorf("write file '%s': %v", filename, err)
 	}
@@ -266,12 +274,9 @@ func UpdateFile(ctx context.Context, filename string, opts AnalysisOptions) erro
 	}
 
 	tempFilename := filename + ".new"
-	bakFilename := filename + ".bak"
 
-	for _, fn := range []string{tempFilename, bakFilename} {
-		if fileExists(fn) {
-			return fmt.Errorf("file '%s' already exists, please remove it before updating this EPD file", fn)
-		}
+	if fileExists(tempFilename) {
+		return fmt.Errorf("temp file '%s' already exists, please remove or rename it before updating this EPD file", tempFilename)
 	}
 
 	filtered := func() []*LineItem {
@@ -284,6 +289,10 @@ func UpdateFile(ctx context.Context, filename string, opts AnalysisOptions) erro
 		}
 		return items
 	}()
+
+	if len(filtered) == 0 {
+		return fmt.Errorf("no entries need updating")
+	}
 
 	a := analyze.New()
 
@@ -309,32 +318,49 @@ func UpdateFile(ctx context.Context, filename string, opts AnalysisOptions) erro
 		bestMove := evals[0]
 
 		uci := bestMove.UCIMove
-		b := fen.FENtoBoard(item.FEN)
-		san := b.UCItoSAN(uci)
+		board := fen.FENtoBoard(item.FEN)
+		san := board.UCItoSAN(uci)
 
 		item.SetString(OpCodeBestMove, san)
 		item.SetInt(OpCodeAnalysisCountDepth, bestMove.Depth)
 		item.SetInt(OpCodeAnalysisCountNodes, bestMove.Nodes)
-		item.SetInt(OpCodeAnalysisCountSeconds, bestMove.Nodes)
+		item.SetInt(OpCodeAnalysisCountSeconds, bestMove.Time/1000)
 
 		if bestMove.Mate == 0 {
-			item.SetInt(OpCodeCentipawnEvaluation, bestMove.POVCP(b.ActiveColor))
+			item.SetInt(OpCodeCentipawnEvaluation, bestMove.POVCP(board.ActiveColor))
 			item.Remove(OpCodeDirectMate)
 		} else {
-			item.SetInt(OpCodeDirectMate, bestMove.POVMate(b.ActiveColor))
+			item.SetInt(OpCodeDirectMate, bestMove.POVMate(board.ActiveColor))
 			item.Remove(OpCodeCentipawnEvaluation)
 		}
 
-		if err := ioutil.WriteFile(tempFilename, []byte(file.String()), 0644); err != nil {
-			return fmt.Errorf("error writing file '%s': %v", tempFilename, err)
+		var pvSAN []string
+		for _, pvMove := range bestMove.PV {
+			pvMoveSAN := board.UCItoSAN(pvMove)
+			pvSAN = append(pvSAN, pvMoveSAN)
+			board.Moves(pvMove)
+		}
+
+		if len(pvSAN) > 1 {
+			item.SetString("pm", pvSAN[1])
+		}
+		if len(pvSAN) > 0 {
+			item.SetString("pv", strings.Join(pvSAN, " "))
+		}
+
+		if err := file.Save(tempFilename, false); err != nil {
+			return err
 		}
 	}
 
-	if err := os.Rename(filename, bakFilename); err != nil {
-		return fmt.Errorf("error renaming '%s' to '%s': %v", filename, bakFilename, err)
+	if err := file.Save(filename, true); err != nil {
+		return err
 	}
-	if err := os.Rename(tempFilename, filename); err != nil {
-		return fmt.Errorf("error renaming '%s' to '%s': %v", tempFilename, filename, err)
+
+	if fileExists(tempFilename) {
+		if err := os.Remove(tempFilename); err != nil {
+			return fmt.Errorf("error remove temp file '%s': %v", tempFilename, err)
+		}
 	}
 
 	cancel()

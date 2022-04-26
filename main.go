@@ -138,11 +138,10 @@ func GetMostFrequentPGNPositions(filename string, minCount int, epdFilename stri
 		if newPositions == 0 {
 			fmt.Printf("no new positions found\n")
 		} else {
-			newFilename := epdFilename + ".new"
-			if err := epdFile.Save(newFilename); err != nil {
+			if err := epdFile.Save(epdFilename, true); err != nil {
 				return err
 			}
-			fmt.Printf("'%s' saved, %d new position(s)\n", newFilename, newPositions)
+			fmt.Printf("'%s' saved, %d new position(s)\n", epdFilename, newPositions)
 		}
 	} else {
 		epdFile := epd.New()
