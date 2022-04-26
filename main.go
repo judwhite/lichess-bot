@@ -25,6 +25,8 @@ func main() {
 		pgnFilename string
 		minPosFreq  int
 		lichessUser string
+		onlyUser    string
+		challenge   string
 	)
 
 	var flags flag.FlagSet
@@ -33,6 +35,8 @@ func main() {
 	flags.StringVar(&pgnFilename, "pgn", "", "the PGN file name")
 	flags.IntVar(&minPosFreq, "freq", 0, "minimum times a position has occurred")
 	flags.StringVar(&lichessUser, "lichess-user", "", "get all rated games for a lichess user")
+	flags.StringVar(&onlyUser, "only-user", "", "the only user to accept challenges from")
+	flags.StringVar(&challenge, "challenge", "", "challenge lichess user")
 
 	if err := flags.Parse(os.Args[1:]); err != nil {
 		if err == flag.ErrHelp {
@@ -42,8 +46,12 @@ func main() {
 		log.Fatal(err)
 	}
 
+	if challenge != "" {
+		onlyUser = challenge
+	}
+
 	if botFlag {
-		runLichessBot()
+		runLichessBot(onlyUser, challenge)
 		return
 	}
 
@@ -80,14 +88,10 @@ func main() {
 
 	flags.PrintDefaults()
 	os.Exit(1)
+}
 
-	//GetMostFrequentPGNPositions("strip.pgn")
-
-	//getGames()
-
-	//analysis()
-
-	//positionLookup()
+func PGNStats(filename string) error {
+	return nil
 }
 
 func GetMostFrequentPGNPositions(filename string, minCount int) {
@@ -141,7 +145,7 @@ func analysis() {
 	//_, _ = fmt.Fprintf(os.Stderr, "total time: %v\n", time.Since(start).Round(time.Second))
 }
 
-func runLichessBot() {
+func runLichessBot(onlyUser, challenge string) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -152,7 +156,7 @@ func runLichessBot() {
 		log.Fatal(err)
 	}
 
-	listener := New(ctx, input, output)
+	listener := New(ctx, input, output, onlyUser, challenge)
 
 	if err := listener.Events(); err != nil {
 		log.Fatal(err)

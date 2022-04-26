@@ -18,6 +18,7 @@ import (
 
 	"trollfish-lichess/analyze"
 	"trollfish-lichess/api"
+	"trollfish-lichess/epd"
 	"trollfish-lichess/fen"
 	"trollfish-lichess/polyglot"
 )
@@ -44,6 +45,7 @@ type Listener struct {
 	challengePending bool
 	declined         chan api.Challenge
 	accepted         chan api.GameEventInfo
+	onlyUser         string
 
 	input  chan<- string
 	output <-chan string
@@ -57,7 +59,7 @@ type BookEntry struct {
 	UCIMove string `json:"uci"`
 }
 
-func New(ctx context.Context, input chan<- string, output <-chan string) *Listener {
+func New(ctx context.Context, input chan<- string, output <-chan string, onlyUser, challenge string) *Listener {
 	l := Listener{
 		ctx:      ctx,
 		input:    input,
@@ -65,6 +67,7 @@ func New(ctx context.Context, input chan<- string, output <-chan string) *Listen
 		declined: make(chan api.Challenge, 512),
 		accepted: make(chan api.GameEventInfo, 512),
 		book:     make(map[uint64][]*BookEntry),
+		onlyUser: strings.ToLower(onlyUser),
 	}
 	input <- "uci"
 	input <- fmt.Sprintf("setoption name SyzygyPath value %s", analyze.SyzygyPath)
@@ -73,18 +76,24 @@ func New(ctx context.Context, input chan<- string, output <-chan string) *Listen
 		log.Fatal(err)
 	}
 
-	go func() {
-		botQueue, err := api.StreamBots()
-		if err != nil {
-			log.Printf("ERR: %v", err)
-		}
+	if onlyUser == "" {
+		go func() {
+			botQueue, err := api.StreamBots()
+			if err != nil {
+				log.Printf("ERR: %v", err)
+			}
 
-		l.botQueueMtx.Lock()
-		l.botQueue = botQueue
-		l.botQueueMtx.Unlock()
+			l.botQueueMtx.Lock()
+			l.botQueue = botQueue
+			l.botQueueMtx.Unlock()
 
-		l.challengeBot()
-	}()
+			l.challengeBot()
+		}()
+	}
+
+	if challenge != "" {
+		l.challenge(challenge, false, 180, 2, "black")
+	}
 
 	return &l
 }
@@ -93,13 +102,13 @@ func (l *Listener) importBook(filename string) error {
 	fmt.Printf("%s loading book %s...\n", ts(), filename)
 	ext := filepath.Ext(filename)
 
-	fp, err := os.Open(filename)
-	if err != nil {
-		return err
-	}
-	defer fp.Close()
-
 	if ext == ".bin" {
+		fp, err := os.Open(filename)
+		if err != nil {
+			return err
+		}
+		defer fp.Close()
+
 		r := bufio.NewReaderSize(fp, 16384)
 		buf := make([]byte, 32)
 		for {
@@ -129,32 +138,25 @@ func (l *Listener) importBook(filename string) error {
 			l.book[key] = append(l.book[key], &BookEntry{Move: move, Freq: freq})
 		}
 	} else if ext == ".epd" {
-		r := bufio.NewScanner(fp)
-		for r.Scan() {
-			line := strings.TrimSpace(r.Text())
-			if len(line) == 0 {
-				continue
-			}
-			sections := strings.Split(line, ";")
-			fenPos := sections[0]
-			for i := 1; i < len(sections); i++ {
-				parts := strings.Split(strings.TrimSpace(sections[i]), " ")
-				if len(parts) != 2 {
-					continue
-				}
-				if parts[0] != "bm_uci" {
-					continue
-				}
-				uci := parts[1]
+		file, err := epd.ReadFile(filename)
+		if err != nil {
+			log.Fatal(err)
+		}
 
-				b := fen.FENtoBoard(fenPos)
-				key := polyglot.Key(b)
-				l.book[key] = append(l.book[key], &BookEntry{Move: 0, Freq: 0, UCIMove: uci})
-			}
+		for _, item := range file.Items {
+			b := fen.FENtoBoard(item.FEN)
+			key := polyglot.Key(b)
+			uci := item.BestMoveUCI()
+			l.book[key] = append(l.book[key], &BookEntry{FEN: item.FEN, Move: 0, Freq: 0, UCIMove: uci})
 		}
 	}
 
 	if len(l.book) > 0 {
+		for _, v := range l.book {
+			for _, item := range v {
+				fmt.Printf("%s bm %s\n", item.FEN, item.UCIMove)
+			}
+		}
 		fmt.Printf("%s book loaded. positions: %d\n", ts(), len(l.book))
 	}
 
@@ -258,13 +260,14 @@ func (l *Listener) QueueChallenge(c api.Challenge) error {
 		return nil
 	}
 
-	/*name := strings.ToLower(c.Challenger.Name)
-	if !strings.Contains(name, "salty") && !strings.Contains(name, "banter") {
-		if err := api.DeclineChallenge(c.ID, "later"); err != nil {
-			return err
+	if l.onlyUser != "" {
+		if strings.EqualFold(c.Challenger.Name, l.onlyUser) || strings.EqualFold(c.Challenger.Name, "bantercode") {
+			if err := api.DeclineChallenge(c.ID, "later"); err != nil {
+				return err
+			}
+			return nil
 		}
-		return nil
-	}*/
+	}
 
 	// only use standard initial position
 	if c.InitialFEN != "" && c.InitialFEN != "startpos" {
@@ -530,9 +533,9 @@ func (l *Listener) challenge(userID string, rated bool, limit, increment int, co
 		return TryChallengeResponse{CreateChallengeErr: err}
 	}
 
-	fmt.Printf("%s challenge sent to %s (id: %s). waiting 10s for response\n", ts(), userID, challengeID)
+	fmt.Printf("%s challenge sent to %s (id: %s). waiting 15s for response\n", ts(), userID, challengeID)
 
-	timer := time.NewTimer(10 * time.Second)
+	timer := time.NewTimer(15 * time.Second)
 	for {
 		select {
 		case c := <-l.declined:

@@ -234,7 +234,7 @@ func (g *Game) playMove(ndjson []byte, state api.State) {
 	var bestMove string
 
 	// check book
-	b := fen.FENtoBoard(startPosFEN)
+	var b fen.Board
 	b.Moves(moves...)
 	key := polyglot.Key(b)
 	bookMoves, ok := g.book[key]

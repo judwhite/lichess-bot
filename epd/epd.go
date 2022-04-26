@@ -18,6 +18,7 @@ const (
 	OpCodeAnalysisCountNodes   = "acn"
 	OpCodeAnalysisCountSeconds = "acs"
 	OpCodeBestMove             = "bm"
+	OpCodeBestMoveUCI          = "bm_uci"
 	OpCodeCentipawnEvaluation  = "ce"
 	OpCodeDirectMate           = "dm"
 )
@@ -80,12 +81,29 @@ type AnalysisOptions struct {
 
 // ACD returns the value for 'acd', the analysis count depth.
 func (item *LineItem) ACD() int {
+	return item.GetInt(OpCodeAnalysisCountDepth)
+}
+
+func (item *LineItem) BestMoveUCI() string {
+	return item.GetString(OpCodeBestMoveUCI)
+}
+
+func (item *LineItem) GetInt(opCode string) int {
 	for _, op := range item.Ops {
-		if op.OpCode == OpCodeAnalysisCountDepth {
+		if op.OpCode == opCode {
 			return op.atoi()
 		}
 	}
 	return 0
+}
+
+func (item *LineItem) GetString(opCode string) string {
+	for _, op := range item.Ops {
+		if op.OpCode == opCode {
+			return op.Value
+		}
+	}
+	return ""
 }
 
 func (item *LineItem) SetInt(opCode string, value int) {
