@@ -279,6 +279,41 @@ func (b *Board) UCItoSAN(move string) string {
 	return san.String()
 }
 
+func (b *Board) SANtoUCI(san string) (string, error) {
+	b.init()
+
+	if len(san) < 2 {
+		return "", fmt.Errorf("'%s' is not a valid move in '%s'", san, b.FEN())
+	}
+
+	piece := san[0]
+	if piece >= 'a' && piece <= 'h' {
+		piece = 'P'
+	}
+	castle := false
+	if strings.HasPrefix(san, "O-O") {
+		piece = 'K'
+		castle = true
+	}
+	if b.ActiveColor == BlackPieces {
+		piece = lower(piece)
+	}
+
+	moves := b.PieceLegalMoves(piece)
+	for _, move := range moves {
+		if !castle && !strings.Contains(san, move.To) {
+			continue
+		}
+
+		testSAN := b.UCItoSAN(move.UCI)
+		if testSAN == san {
+			return move.UCI, nil
+		}
+	}
+
+	return "", fmt.Errorf("'%s' is not a valid move in '%s'", san, b.FEN())
+}
+
 func (b *Board) checkMoveNotCheck(from, to int) bool {
 	uci := indexesToUCI(from, to)
 	activeColor := b.ActiveColor

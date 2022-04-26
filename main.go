@@ -20,22 +20,24 @@ import (
 
 func main() {
 	var (
-		botFlag     bool
-		epdFilename string
-		pgnFilename string
-		minPosFreq  int
-		lichessUser string
-		onlyUser    string
-		challenge   string
+		botFlag              bool
+		epdFilename          string
+		freqPGNFilename      string
+		freqMergeEPDFilename string
+		freqCount            int
+		lichessUser          string
+		onlyUser             string
+		challenge            string
 	)
 
 	var flags flag.FlagSet
 	flags.BoolVar(&botFlag, "bot", false, "runs the bot")
 	flags.StringVar(&epdFilename, "update-epd", "", "run analysis and update an epd file")
-	flags.StringVar(&pgnFilename, "pgn", "", "the PGN file name")
-	flags.IntVar(&minPosFreq, "freq", 0, "minimum times a position has occurred")
+	flags.StringVar(&freqPGNFilename, "freq-pgn", "", "show most common positions from a PGN file in EPD format (see also freq-count)")
+	flags.StringVar(&freqMergeEPDFilename, "freq-merge-epd", "", "merge positions with an EPD file. only new positions are added.")
+	flags.IntVar(&freqCount, "freq-count", 3, "minimum times a position must occur (see freq-pgn)")
 	flags.StringVar(&lichessUser, "lichess-user", "", "get all rated games for a lichess user")
-	flags.StringVar(&onlyUser, "only-user", "", "the only user to accept challenges from")
+	flags.StringVar(&onlyUser, "only-user", "", "only accept challenges from this user")
 	flags.StringVar(&challenge, "challenge", "", "challenge lichess user")
 
 	if err := flags.Parse(os.Args[1:]); err != nil {
@@ -69,8 +71,10 @@ func main() {
 		return
 	}
 
-	if pgnFilename != "" && minPosFreq > 0 {
-		GetMostFrequentPGNPositions(pgnFilename, minPosFreq)
+	if freqPGNFilename != "" && freqCount > 0 {
+		if err := GetMostFrequentPGNPositions(freqPGNFilename, freqCount, freqMergeEPDFilename); err != nil {
+			log.Fatal(err)
+		}
 		return
 	}
 
@@ -94,10 +98,10 @@ func PGNStats(filename string) error {
 	return nil
 }
 
-func GetMostFrequentPGNPositions(filename string, minCount int) {
+func GetMostFrequentPGNPositions(filename string, minCount int, epdFilename string) error {
 	db, err := fen.LoadPGNDatabase(filename)
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 
 	var moves int
@@ -106,7 +110,7 @@ func GetMostFrequentPGNPositions(filename string, minCount int) {
 	for _, game := range db.Games {
 		moves += len(game.Moves)
 		for k := range game.Positions {
-			pos[k] = pos[k] + 1
+			pos[k] += 1
 		}
 	}
 
@@ -116,10 +120,35 @@ func GetMostFrequentPGNPositions(filename string, minCount int) {
 		}
 	}
 
-	for fenKey := range pos {
-		san := db.MostFrequentMove(fenKey)
-		fmt.Printf("%s bm %s;\n", fenKey, san)
+	if epdFilename != "" {
+		epdFile, err := epd.LoadFile(epdFilename)
+		if err != nil {
+			return err
+		}
+
+		for fenKey := range pos {
+			if !epdFile.Contains(fenKey) {
+				san := db.MostFrequentMove(fenKey)
+				epdFile.Add(fenKey, epd.Operation{OpCode: epd.OpCodeSuppliedMove, Value: san})
+			}
+		}
+
+		newFilename := epdFilename + ".new"
+		if err := epdFile.Save(newFilename); err != nil {
+			return err
+		}
+		fmt.Printf("'%s' saved\n", newFilename)
+	} else {
+		epdFile := epd.New()
+		for fenKey := range pos {
+			san := db.MostFrequentMove(fenKey)
+			epdFile.Add(fenKey, epd.Operation{OpCode: epd.OpCodeSuppliedMove, Value: san})
+		}
+
+		fmt.Print(epdFile.String())
 	}
+
+	return nil
 }
 
 func positionLookup() {

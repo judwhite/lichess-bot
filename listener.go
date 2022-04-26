@@ -138,15 +138,18 @@ func (l *Listener) importBook(filename string) error {
 			l.book[key] = append(l.book[key], &BookEntry{Move: move, Freq: freq})
 		}
 	} else if ext == ".epd" {
-		file, err := epd.ReadFile(filename)
+		file, err := epd.LoadFile(filename)
 		if err != nil {
 			log.Fatal(err)
 		}
 
-		for _, item := range file.Items {
+		for _, item := range file.Lines {
 			b := fen.FENtoBoard(item.FEN)
 			key := polyglot.Key(b)
-			uci := item.BestMoveUCI()
+			uci, err := b.SANtoUCI(item.BestMove())
+			if err != nil {
+				return err
+			}
 			l.book[key] = append(l.book[key], &BookEntry{FEN: item.FEN, Move: 0, Freq: 0, UCIMove: uci})
 		}
 	}

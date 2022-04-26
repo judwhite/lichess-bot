@@ -18,16 +18,41 @@ const (
 	OpCodeAnalysisCountNodes   = "acn"
 	OpCodeAnalysisCountSeconds = "acs"
 	OpCodeBestMove             = "bm"
-	OpCodeBestMoveUCI          = "bm_uci"
 	OpCodeCentipawnEvaluation  = "ce"
 	OpCodeDirectMate           = "dm"
+	OpCodeSuppliedMove         = "sm"
 )
 
 type File struct {
-	Items []*LineItem
+	Lines []*LineItem
 }
 
-func (f File) Save(filename string) error {
+func (f *File) Contains(fenKey string) bool {
+	fenKey = fenToKey(fenKey)
+	if len(fenKey) == 0 {
+		return false
+	}
+
+	for _, item := range f.Lines {
+		if item.FEN == fenKey {
+			return true
+		}
+	}
+
+	return false
+}
+
+func (f *File) Add(fenKey string, ops ...Operation) {
+	fenKey = fenToKey(fenKey)
+	line := &LineItem{FEN: fenKey}
+	for _, op := range ops {
+		line.Ops = append(line.Ops, op)
+	}
+	f.Lines = append(f.Lines, line)
+	line.RawText = line.String()
+}
+
+func (f *File) Save(filename string) error {
 	b := []byte(f.String())
 	if err := ioutil.WriteFile(filename, b, 0644); err != nil {
 		return fmt.Errorf("write file '%s': %v", filename, err)
@@ -35,31 +60,10 @@ func (f File) Save(filename string) error {
 	return nil
 }
 
-func (f File) String() string {
+func (f *File) String() string {
 	var sb strings.Builder
-	for _, line := range f.Items {
-		if line.FEN == "" {
-			sb.WriteString(line.RawText)
-			sb.WriteByte('\n')
-			continue
-		}
-
-		sb.WriteString(line.FEN)
-
-		if len(line.Ops) == 0 {
-			sb.WriteByte('\n')
-			continue
-		}
-
-		for i := 0; i < len(line.Ops); i++ {
-			op := line.Ops[i]
-
-			sb.WriteByte(' ')
-			sb.WriteString(op.OpCode)
-			sb.WriteByte(' ')
-			sb.WriteString(op.Value)
-			sb.WriteByte(';')
-		}
+	for _, line := range f.Lines {
+		sb.WriteString(line.String())
 		sb.WriteByte('\n')
 	}
 	return sb.String()
@@ -71,6 +75,24 @@ type LineItem struct {
 	RawText string
 }
 
+func (line *LineItem) String() string {
+	if line.FEN == "" {
+		return line.RawText
+	}
+
+	var sb strings.Builder
+	sb.WriteString(line.FEN)
+	for _, op := range line.Ops {
+		sb.WriteByte(' ')
+		sb.WriteString(op.OpCode)
+		sb.WriteByte(' ')
+		sb.WriteString(op.Value)
+		sb.WriteByte(';')
+	}
+
+	return sb.String()
+}
+
 type AnalysisOptions struct {
 	MinDepth   int
 	MaxDepth   int
@@ -80,16 +102,16 @@ type AnalysisOptions struct {
 }
 
 // ACD returns the value for 'acd', the analysis count depth.
-func (item *LineItem) ACD() int {
-	return item.GetInt(OpCodeAnalysisCountDepth)
+func (line *LineItem) ACD() int {
+	return line.GetInt(OpCodeAnalysisCountDepth)
 }
 
-func (item *LineItem) BestMoveUCI() string {
-	return item.GetString(OpCodeBestMoveUCI)
+func (line *LineItem) BestMove() string {
+	return line.GetString(OpCodeBestMove)
 }
 
-func (item *LineItem) GetInt(opCode string) int {
-	for _, op := range item.Ops {
+func (line *LineItem) GetInt(opCode string) int {
+	for _, op := range line.Ops {
 		if op.OpCode == opCode {
 			return op.atoi()
 		}
@@ -97,8 +119,8 @@ func (item *LineItem) GetInt(opCode string) int {
 	return 0
 }
 
-func (item *LineItem) GetString(opCode string) string {
-	for _, op := range item.Ops {
+func (line *LineItem) GetString(opCode string) string {
+	for _, op := range line.Ops {
 		if op.OpCode == opCode {
 			return op.Value
 		}
@@ -106,32 +128,32 @@ func (item *LineItem) GetString(opCode string) string {
 	return ""
 }
 
-func (item *LineItem) SetInt(opCode string, value int) {
+func (line *LineItem) SetInt(opCode string, value int) {
 	val := strconv.Itoa(value)
-	item.SetString(opCode, val)
+	line.SetString(opCode, val)
 }
 
-func (item *LineItem) SetString(opCode, value string) {
-	for i, op := range item.Ops {
+func (line *LineItem) SetString(opCode, value string) {
+	for i, op := range line.Ops {
 		if op.OpCode == opCode {
-			item.Ops[i].Value = value
+			line.Ops[i].Value = value
 			return
 		}
 	}
 
-	item.Ops = append(item.Ops, Operation{OpCode: opCode, Value: value})
+	line.Ops = append(line.Ops, Operation{OpCode: opCode, Value: value})
 }
 
-func (item *LineItem) Remove(opCode string) {
-	for i := 0; i < len(item.Ops); i++ {
-		if item.Ops[i].OpCode == opCode {
-			item.Ops = append(item.Ops[:i], item.Ops[i+1:]...)
+func (line *LineItem) Remove(opCode string) {
+	for i := 0; i < len(line.Ops); i++ {
+		if line.Ops[i].OpCode == opCode {
+			line.Ops = append(line.Ops[:i], line.Ops[i+1:]...)
 			i--
 		}
 	}
 }
 
-func (item *LineItem) parseRawText() {
+func (line *LineItem) parseRawText() {
 	// consume FEN (up to 4th space)
 	var (
 		spaces          int
@@ -139,13 +161,13 @@ func (item *LineItem) parseRawText() {
 		rest            string
 	)
 
-	for i := 0; i < len(item.RawText); i++ {
-		if item.RawText[i] == ' ' || (item.RawText[i] == ';' && spaces == 3) {
+	for i := 0; i < len(line.RawText); i++ {
+		if line.RawText[i] == ' ' || (line.RawText[i] == ';' && spaces == 3) {
 			spaces++
 			charsInFENField = 0
 			if spaces == 4 {
-				item.FEN = item.RawText[:i]
-				rest = item.RawText[i+1:]
+				line.FEN = line.RawText[:i]
+				rest = line.RawText[i+1:]
 				break
 			}
 		} else {
@@ -155,7 +177,7 @@ func (item *LineItem) parseRawText() {
 
 	if spaces < 4 {
 		if spaces == 3 && charsInFENField > 0 {
-			item.FEN = item.RawText
+			line.FEN = line.RawText
 		}
 		return
 	}
@@ -179,13 +201,13 @@ func (item *LineItem) parseRawText() {
 
 		if len(parts) == 1 {
 			if opCode != "" {
-				item.Ops = append(item.Ops, op)
+				line.Ops = append(line.Ops, op)
 			}
 			continue
 		}
 
 		op.Value = strings.TrimSpace(parts[1])
-		item.Ops = append(item.Ops, op)
+		line.Ops = append(line.Ops, op)
 	}
 }
 
@@ -202,17 +224,21 @@ func (op Operation) atoi() int {
 	return n
 }
 
-func ReadFile(filename string) (File, error) {
+func LoadFile(filename string) (*File, error) {
 	b, err := ioutil.ReadFile(filename)
 	if err != nil {
-		return File{}, fmt.Errorf("file '%s': %v", filename, err)
+		return nil, fmt.Errorf("file '%s': %v", filename, err)
 	}
 
 	return ParseText(string(b)), nil
 }
 
-func ParseText(text string) File {
-	var file File
+func New() *File {
+	return &File{}
+}
+
+func ParseText(text string) *File {
+	file := New()
 
 	lines := strings.Split(text, "\n")
 	for i, line := range lines {
@@ -224,7 +250,7 @@ func ParseText(text string) File {
 		item := LineItem{RawText: line}
 		item.parseRawText()
 
-		file.Items = append(file.Items, &item)
+		file.Lines = append(file.Lines, &item)
 	}
 
 	return file
@@ -234,7 +260,7 @@ func UpdateFile(ctx context.Context, filename string, opts AnalysisOptions) erro
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	file, err := ReadFile(filename)
+	file, err := LoadFile(filename)
 	if err != nil {
 		return err
 	}
@@ -250,7 +276,7 @@ func UpdateFile(ctx context.Context, filename string, opts AnalysisOptions) erro
 
 	filtered := func() []*LineItem {
 		var items []*LineItem
-		for _, item := range file.Items {
+		for _, item := range file.Lines {
 			if item.FEN == "" || item.ACD() >= opts.MinDepth {
 				continue
 			}
@@ -287,7 +313,6 @@ func UpdateFile(ctx context.Context, filename string, opts AnalysisOptions) erro
 		san := b.UCItoSAN(uci)
 
 		item.SetString(OpCodeBestMove, san)
-		item.SetString("bm_uci", uci)
 		item.SetInt(OpCodeAnalysisCountDepth, bestMove.Depth)
 		item.SetInt(OpCodeAnalysisCountNodes, bestMove.Nodes)
 		item.SetInt(OpCodeAnalysisCountSeconds, bestMove.Nodes)
@@ -327,4 +352,13 @@ func fileExists(filename string) bool {
 		return false
 	}
 	return true
+}
+
+func fenToKey(fenKey string) string {
+	fenKey = strings.TrimSpace(fenKey)
+	parts := strings.Split(fenKey, " ")
+	if len(parts) <= 4 {
+		return fenKey
+	}
+	return strings.Join(parts[:4], " ")
 }

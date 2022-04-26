@@ -14,6 +14,12 @@ type PGNMoves struct {
 	SANMoves []string `json:"sanMoves"`
 }
 
+type FENMoves struct {
+	FEN string `json:"fen"`
+	UCI string `json:"uci"`
+	SAN string `json:"san"`
+}
+
 func TestPGNtoMoves(t *testing.T) {
 	// arrange
 	cases := pgnMovesTestData(t)
@@ -49,6 +55,20 @@ func TestPGNtoMoves(t *testing.T) {
 			if !reflect.DeepEqual(c.SANMoves, sanMoves) {
 				t.Errorf("\nwant:\n%v\ngot:\n%v", c.SANMoves, sanMoves)
 			}
+
+			// now test SAN to UCI. should break this out into a separate test.
+			board.LoadFEN("")
+			for i, sanMove := range sanMoves {
+				gotUCI, err := board.SANtoUCI(sanMove)
+				if err != nil {
+					t.Fatal(err)
+				}
+				wantUCI := uciMoves[i]
+				if wantUCI != gotUCI {
+					t.Errorf("want: '%s' got: '%s'", wantUCI, gotUCI)
+				}
+				board.Moves(wantUCI)
+			}
 		})
 	}
 }
@@ -68,6 +88,41 @@ func pgnMovesTestData(tb testing.TB) []PGNMoves {
 	}
 
 	return cases
+}
+
+func fenMovesTestData(tb testing.TB) []FENMoves {
+	fp, err := os.Open("testdata/fen_uci_san.json")
+	if err != nil {
+		tb.Fatal(err)
+	}
+	defer fp.Close()
+
+	var cases []FENMoves
+
+	dec := json.NewDecoder(fp)
+	if err := dec.Decode(&cases); err != nil {
+		tb.Fatal(err)
+	}
+
+	return cases
+}
+
+func TestSANtoUCI(t *testing.T) {
+	cases := fenMovesTestData(t)
+
+	for _, c := range cases {
+		t.Run(c.FEN+" "+c.SAN, func(t *testing.T) {
+			board := FENtoBoard(c.FEN)
+			uci, err := board.SANtoUCI(c.SAN)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if c.UCI != uci {
+				t.Errorf("want: '%s' got: '%s'", c.UCI, uci)
+			}
+		})
+	}
 }
 
 func BenchmarkPGNtoMoves(b *testing.B) {
