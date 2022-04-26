@@ -12,19 +12,27 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"trollfish-lichess/epd"
 
 	"trollfish-lichess/api"
+	"trollfish-lichess/epd"
 	"trollfish-lichess/fen"
 )
 
 func main() {
-	var botFlag bool
-	var epdFilename string
+	var (
+		botFlag     bool
+		epdFilename string
+		pgnFilename string
+		minPosFreq  int
+		lichessUser string
+	)
 
 	var flags flag.FlagSet
 	flags.BoolVar(&botFlag, "bot", false, "runs the bot")
-	flags.StringVar(&epdFilename, "epd", "", "run analysis and update an epd file")
+	flags.StringVar(&epdFilename, "update-epd", "", "run analysis and update an epd file")
+	flags.StringVar(&pgnFilename, "pgn", "", "the PGN file name")
+	flags.IntVar(&minPosFreq, "freq", 0, "minimum times a position has occurred")
+	flags.StringVar(&lichessUser, "lichess-user", "", "get all rated games for a lichess user")
 
 	if err := flags.Parse(os.Args[1:]); err != nil {
 		if err == flag.ErrHelp {
@@ -47,9 +55,26 @@ func main() {
 			MaxTime:    3 * time.Minute,
 			DepthDelta: 5,
 		}
-		if err := epd.UpdateFile(context.TODO(), epdFilename, opts); err != nil {
+		if err := epd.UpdateFile(context.Background(), epdFilename, opts); err != nil {
 			log.Fatal(err)
 		}
+		return
+	}
+
+	if pgnFilename != "" && minPosFreq > 0 {
+		GetMostFrequentPGNPositions(pgnFilename, minPosFreq)
+		return
+	}
+
+	if lichessUser != "" {
+		start := time.Now()
+
+		fn, count, err := api.GetGames(lichessUser, 0)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		fmt.Printf("saved %s with %d games in %v\n", fn, count, time.Since(start).Round(time.Second))
 		return
 	}
 
@@ -65,7 +90,7 @@ func main() {
 	//positionLookup()
 }
 
-func GetMostFrequentPGNPositions(filename string) {
+func GetMostFrequentPGNPositions(filename string, minCount int) {
 	db, err := fen.LoadPGNDatabase(filename)
 	if err != nil {
 		log.Fatal(err)
@@ -82,20 +107,14 @@ func GetMostFrequentPGNPositions(filename string) {
 	}
 
 	for fenKey, freq := range pos {
-		if freq < 3 {
+		if freq < minCount {
 			delete(pos, fenKey)
 		}
 	}
 
 	for fenKey := range pos {
 		san := db.MostFrequentMove(fenKey)
-		fmt.Printf("%s; bm %s;\n", fenKey, san)
-	}
-}
-
-func getGames() {
-	if err := api.GetGames("TrollololFish", time.Now(), 2); err != nil {
-		log.Fatal(err)
+		fmt.Printf("%s bm %s;\n", fenKey, san)
 	}
 }
 

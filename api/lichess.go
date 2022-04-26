@@ -42,11 +42,11 @@ type PositionResults struct {
 	TotalGames int    `json:"total_games"`
 }
 
-func GetGames(username string, until time.Time, max int) error {
+func GetGames(username string, count int) (string, int, error) {
 	filename := username + ".pgn"
 	fp, err := os.OpenFile(filename, os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
-		return err
+		return filename, 0, err
 	}
 
 	w := bufio.NewWriter(fp)
@@ -55,6 +55,7 @@ func GetGames(username string, until time.Time, max int) error {
 		fp.Close()
 	}()
 
+	var downloaded int
 	handler := func(ndjson []byte) bool {
 		var game CompletedGame
 		if err := json.Unmarshal(ndjson, &game); err != nil {
@@ -66,14 +67,14 @@ func GetGames(username string, until time.Time, max int) error {
 			log.Fatal(err)
 		}
 
-		fmt.Print(game.PGN)
+		downloaded++
 
 		return true
 	}
 
 	u, err := url.Parse(fmt.Sprintf("https://lichess.org/api/games/user/%s", url.PathEscape(username)))
 	if err != nil {
-		return err
+		return filename, 0, err
 	}
 	q := u.Query()
 	//q.Add("since", unixMilli(since))
@@ -83,20 +84,19 @@ func GetGames(username string, until time.Time, max int) error {
 	q.Add("evals", "true")
 	q.Add("opening", "true")
 	q.Add("rated", "true")
-	if max > 0 {
-		q.Add("max", itoa(max))
+	if count > 0 {
+		q.Add("max", itoa(count))
 	}
 	q.Add("pgnInJson", "true")
-	// pgnInJson - Include the full PGN within the JSON response, in a pgn field. The response type must be set to  by the request Accept header.
-	// clocks - Include clock comments in the PGN moves, when available.
+	q.Add("clocks", "true")
 	u.RawQuery = q.Encode()
 
 	endpoint := u.String()
 	if err := ReadStream(endpoint, handler); err != nil {
-		return err
+		return filename, 0, err
 	}
 
-	return nil
+	return filename, downloaded, nil
 }
 
 func Lookup(fen, play string) (PositionResults, error) {
@@ -164,7 +164,7 @@ func Lookup(fen, play string) (PositionResults, error) {
 }
 
 func ReadStream(endpoint string, handler func([]byte) bool) error {
-	fmt.Printf("%s REQ: %s %s\n", ts(), "ReadStream", endpoint)
+	fmt.Printf("%s %s\n", ts(), endpoint)
 
 	req, err := http.NewRequest("GET", endpoint, nil)
 	if err != nil {

@@ -96,9 +96,10 @@ func LoadPGNDatabase(filename string) (Database, error) {
 	r := bufio.NewScanner(fp)
 
 	var (
-		pgn strings.Builder
-		mtx sync.Mutex
-		wg  sync.WaitGroup
+		pgn    strings.Builder
+		mtx    sync.Mutex
+		wg     sync.WaitGroup
+		isGame bool
 	)
 
 	addGame := func() error {
@@ -126,12 +127,17 @@ func LoadPGNDatabase(filename string) (Database, error) {
 		}()
 
 		pgn.Reset()
+		isGame = false
 		return nil
 	}
 
 	for r.Scan() {
 		line := strings.TrimSpace(r.Text())
-		if len(line) == 0 {
+		if !strings.HasPrefix(line, "[") && len(line) != 0 {
+			isGame = true
+		}
+
+		if len(line) == 0 && isGame {
 			if err := addGame(); err != nil {
 				return db, err
 			}
@@ -139,7 +145,7 @@ func LoadPGNDatabase(filename string) (Database, error) {
 		}
 
 		if pgn.Len() != 0 {
-			pgn.WriteRune(' ')
+			pgn.WriteRune('\n')
 		}
 		pgn.WriteString(line)
 	}
@@ -165,24 +171,41 @@ func PGNtoMoves(pgn string) ([]LegalMove, error) {
 
 	var moves []LegalMove
 
-	pgn = strings.TrimSpace(strings.Join(strings.Split(pgn, "\n"), " "))
+	lines := strings.Split(pgn, "\n")
+	for i := 0; i < len(lines); i++ {
+		line := strings.TrimSpace(lines[i])
+		if len(line) > 0 && !strings.HasPrefix(line, "[") {
+			// start of move data
+			lines = lines[i:]
+			break
+		}
+	}
+
+	pgn = strings.TrimSpace(strings.Join(lines, " "))
 	parts := strings.Split(pgn, " ")
-	b := FENtoBoard("")
+	var b Board
 	var fullMove int
-	for i, part := range parts {
+	for i := 0; i < len(parts); i++ {
+		part := parts[i]
 		if part == "1-0" || part == "0-1" || part == "1/2-1/2" || part == "*" || part == "" {
 			continue
 		}
 
 		if strings.HasSuffix(part, ".") {
-			fullMove++
-			moveNum := strings.TrimSuffix(part, ".")
+			moveNum := strings.TrimRight(part, ".")
 			n, err := strconv.Atoi(moveNum)
 			if err != nil {
 				return nil, fmt.Errorf("%v: '%s'", err, moveNum)
 			}
-			if n != fullMove {
-				return nil, fmt.Errorf("move number '%s' (%d) doesn't match fullMove: %d i: %d", part, n, fullMove, i)
+			fullMove = n
+			continue
+		}
+
+		if strings.HasPrefix(part, "{") {
+			for i = i + 1; i < len(parts); i++ {
+				if strings.HasSuffix(parts[i], "}") {
+					break
+				}
 			}
 			continue
 		}
