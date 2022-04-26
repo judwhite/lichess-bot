@@ -130,6 +130,7 @@ type Eval struct {
 	PV         []string `json:"pv"`
 	Mated      bool     `json:"mated,omitempty"`
 	Raw        string   `json:"-"`
+	DepthDelta int      `json:"delta"`
 }
 
 func (e Eval) Score() int {
@@ -163,6 +164,7 @@ func (e Eval) Clone() Eval {
 		PV:         e.PV,
 		Mated:      e.Mated,
 		Raw:        e.Raw,
+		DepthDelta: e.DepthDelta,
 	}
 	clone.PV = make([]string, len(e.PV))
 	copy(clone.PV, e.PV)
@@ -301,7 +303,7 @@ func (a *Analyzer) getLines(ctx context.Context, check BestMoveCheck, color fen.
 
 	showEngineOutputAfter := 20 * time.Second
 	floorDepth := check.MinDepth - check.DepthDelta + 1
-	ignoreDepthsGreaterThan := 0
+	ignoreDepthsGreaterThan := 255
 
 	minTimeMS := int(check.MinTime.Milliseconds())
 	timeout := time.NewTimer(check.MaxTime)
@@ -321,7 +323,7 @@ loop:
 			}
 			if printEngineOutput {
 				if showEngineOutput(line) {
-					logInfo(fmt.Sprintf("t=%v/%v <- %s", time.Since(start).Round(time.Second), check.MaxTime, line))
+					//logInfo(fmt.Sprintf("t=%v/%v <- %s", time.Since(start).Round(time.Second), check.MaxTime, line))
 				}
 			}
 
@@ -352,6 +354,47 @@ loop:
 				}
 
 				moves = append(moves, eval)
+
+				sort.Slice(moves, func(i, j int) bool {
+					if moves[i].Depth != moves[j].Depth {
+						return moves[i].Depth > moves[j].Depth
+					}
+
+					if moves[i].MultiPV != moves[j].MultiPV {
+						return moves[i].MultiPV < moves[j].MultiPV
+					}
+
+					if moves[i].Nodes != moves[j].Nodes {
+						return moves[i].Nodes > moves[j].Nodes
+					}
+
+					return moves[i].Time > moves[j].Time
+				})
+
+				if eval.Depth >= check.MinDepth && len(moves) > 0 {
+					delta := 1
+					move := moves[0].UCIMove
+					for i := 1; i < len(moves); i++ {
+						if moves[i].MultiPV != 1 || moves[i].Depth < floorDepth {
+							continue
+						}
+						if moves[i].UCIMove == move {
+							delta++
+						} else {
+							break
+						}
+					}
+					if eval.Time >= minTimeMS {
+						t := fmt.Sprintf("t=%v/%v", time.Since(start).Round(time.Second), check.MaxTime)
+						if delta >= check.DepthDelta {
+							logInfo(fmt.Sprintf("%s delta %d >= %d @ depth %d. move: %s cp: %d mate: %d", t, delta, check.DepthDelta, eval.Depth, eval.UCIMove, eval.POVCP(color), eval.POVMate(color)))
+							ignoreDepthsGreaterThan = eval.Depth
+							a.input <- "stop"
+						} else {
+							logInfo(fmt.Sprintf("%s delta %d < %d @ depth %d. move: %s cp: %d mate: %d", t, delta, check.DepthDelta, eval.Depth, eval.UCIMove, eval.POVCP(color), eval.POVMate(color)))
+						}
+					}
+				}
 			}
 
 		case <-timeout.C:
@@ -388,21 +431,38 @@ loop:
 		maxDepth--
 	}
 
-	remove := func(i int) bool {
-		if moves[i].Depth < 10 {
-			return true
-		}
-		if allDepths {
-			return moves[i].Depth > maxDepth
-		}
-		return moves[i].Depth != maxDepth
-	}
-
 	for i := 0; i < len(moves); i++ {
-		if remove(i) {
+		if moves[i].Depth > maxDepth || moves[i].MultiPV != 1 {
 			moves = append(moves[:i], moves[i+1:]...)
 			i--
 			continue
+		}
+	}
+
+	moves[len(moves)-1].DepthDelta = 1
+	prev := moves[len(moves)-1]
+	for i := len(moves) - 2; i >= 0; i-- {
+		if moves[i].UCIMove == prev.UCIMove {
+			moves[i].DepthDelta = prev.DepthDelta + 1
+		} else {
+			moves[i].DepthDelta = 1
+		}
+		prev = moves[i]
+	}
+
+	cur := prev
+	if cur.DepthDelta < check.DepthDelta {
+		for i := 1; i < len(moves); i++ {
+			move := moves[i]
+			if move.Depth < check.MinDepth {
+				break
+			}
+			if move.DepthDelta > cur.DepthDelta {
+				cur = move
+				if cur.DepthDelta >= check.DepthDelta {
+					moves = moves[i:]
+				}
+			}
 		}
 	}
 
@@ -613,47 +673,40 @@ func (a *Analyzer) analyzePosition(ctx context.Context, fenPos string, check Bes
 		return nil, fmt.Errorf("no evaluations returned for fen '%s'", fenPos)
 	}
 
-	curDepth := 0
 	logInfo("")
-	newestEvals := maxDepthEvals(evals)
+	//newestEvals := maxDepthEvals(evals)
 	player := board.ActiveColor
-	var bestMoveAtDepth Eval
+	var best Eval
 	for _, eval := range evals {
+		if eval.Depth > best.Depth {
+			best = eval.Clone()
+		} else if eval.Depth == best.Depth && eval.Score() > best.Score() {
+			best = eval.Clone()
+		}
+		const wc, diff = 0.0, 0.0
+		//wc := evalWinningChances(eval)
+		//diff := diffWC(eval, bestMoveAtDepth)
+
 		san := board.UCItoSAN(eval.UCIMove)
-		if eval.Depth > curDepth {
-			curDepth = eval.Depth
-			newestEvals = nil
-			bestMoveAtDepth = eval.Clone()
-		} else if eval.Depth != curDepth {
-			continue
-		}
-		wc := evalWinningChances(eval)
-		diff := diffWC(eval, bestMoveAtDepth)
+		//newestEvals = append(newestEvals, eval.Clone())
 
-		var mark string
-		if diff < cutoff && cutoff != 0 {
-			mark = fmt.Sprintf("(%.2f below wc_cutoff %.2f)", diff, cutoff)
-		} else {
-			newestEvals = append(newestEvals, eval.Clone())
-		}
-
-		logInfo(fmt.Sprintf("depth: %d move: %-7s %s cp: %6d mate: %3d wc: %6.2f wc_diff: %6.2f %s", eval.Depth, san, eval.UCIMove, eval.POVCP(player), eval.POVMate(player), wc, diff, mark))
+		logInfo(fmt.Sprintf("    depth: %d depth_delta: %d move: %-7s %s cp: %6d mate: %3d wc: %6.2f wc_diff: %6.2f", eval.Depth, eval.DepthDelta, san, eval.UCIMove, eval.POVCP(player), eval.POVMate(player), wc, diff))
 	}
 	logInfo("")
 
-	bestMove := bestEval(newestEvals).Clone()
+	//bestMove := bestEval(newestEvals).Clone()
 
-	for _, eval := range newestEvals {
+	/*for _, eval := range newestEvals {
 		san := board.UCItoSAN(eval.UCIMove)
 		diff := diffWC(eval, bestMove)
-		logInfo(fmt.Sprintf("*** depth: %d move: %-7s %s cp: %6d mate: %3d wc-diff: %0.2f", eval.Depth, san, eval.UCIMove, eval.POVCP(player), eval.POVMate(player), diff))
-	}
+		logInfo(fmt.Sprintf("*** depth: %d depth_delta: %d move: %-7s %s cp: %6d mate: %3d wc-diff: %0.2f", eval.Depth, eval.DepthDelta, san, eval.UCIMove, eval.POVCP(player), eval.POVMate(player), diff))
+	}*/
 
 	logInfo("")
 	logInfo(fmt.Sprintf("%3d/%3d %3d. top_move: %-7s top_cp: %6d top_mate: %3d",
-		1, 1, 1, board.UCItoSAN(bestMove.UCIMove), bestMove.POVCP(player), bestMove.POVMate(player)))
+		1, 1, 1, board.UCItoSAN(best.UCIMove), best.POVCP(player), best.POVMate(player)))
 
-	return newestEvals, nil
+	return []Eval{best}, nil
 }
 
 func debugEvalTable(startFEN string, movesEval Moves) string {

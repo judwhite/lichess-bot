@@ -146,7 +146,11 @@ func (l *Listener) importBook(filename string) error {
 		for _, item := range file.Lines {
 			b := fen.FENtoBoard(item.FEN)
 			key := polyglot.Key(b)
-			uci, err := b.SANtoUCI(item.BestMove())
+			bestMoveSAN := item.BestMove()
+			if bestMoveSAN == "" {
+				continue
+			}
+			uci, err := b.SANtoUCI(bestMoveSAN)
 			if err != nil {
 				return err
 			}

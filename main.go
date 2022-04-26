@@ -60,9 +60,9 @@ func main() {
 	if epdFilename != "" {
 		opts := epd.AnalysisOptions{
 			MinDepth:   32,
-			MaxDepth:   64,
+			MaxDepth:   80,
 			MinTime:    10 * time.Second,
-			MaxTime:    3 * time.Minute,
+			MaxTime:    5 * time.Minute,
 			DepthDelta: 5,
 		}
 		if err := epd.UpdateFile(context.Background(), epdFilename, opts); err != nil {
