@@ -126,18 +126,24 @@ func GetMostFrequentPGNPositions(filename string, minCount int, epdFilename stri
 			return err
 		}
 
+		var newPositions int
 		for fenKey := range pos {
 			if !epdFile.Contains(fenKey) {
 				san := db.MostFrequentMove(fenKey)
 				epdFile.Add(fenKey, epd.Operation{OpCode: epd.OpCodeSuppliedMove, Value: san})
+				newPositions++
 			}
 		}
 
-		newFilename := epdFilename + ".new"
-		if err := epdFile.Save(newFilename); err != nil {
-			return err
+		if newPositions == 0 {
+			fmt.Printf("no new positions found\n")
+		} else {
+			newFilename := epdFilename + ".new"
+			if err := epdFile.Save(newFilename); err != nil {
+				return err
+			}
+			fmt.Printf("'%s' saved, %d new position(s)\n", newFilename, newPositions)
 		}
-		fmt.Printf("'%s' saved\n", newFilename)
 	} else {
 		epdFile := epd.New()
 		for fenKey := range pos {
