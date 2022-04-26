@@ -6,3 +6,7 @@ trollfish
 *.pprof
 *.test
 *.tmp
+*.bak
+*.backup
+*.bin
+*.epd
