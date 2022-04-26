@@ -292,7 +292,7 @@ func maxDepthEvals(evals []Eval) []Eval {
 	return maxDepthEvals
 }
 
-func (a *Analyzer) getLines(ctx context.Context, check BestMoveCheck, color fen.Color) []Eval {
+func (a *Analyzer) getLines(ctx context.Context, check BestMoveCheck, fenPos string) []Eval {
 	start := time.Now()
 
 	var moves []Eval
@@ -342,7 +342,7 @@ loop:
 					maxDepth = eval.Depth
 				}
 
-				// remove evals at same depth + PV[0] with less nodes searched
+				// remove evals at same depth + PV[0] with fewer nodes searched
 				for i := 0; i < len(moves); i++ {
 					if moves[i].Depth == eval.Depth && moves[i].UCIMove == eval.UCIMove {
 						if moves[i].Nodes <= eval.Nodes {
@@ -385,13 +385,18 @@ loop:
 						}
 					}
 					if eval.Time >= minTimeMS {
+						board := fen.FENtoBoard(fenPos)
+						globalCP := eval.POVCP(board.ActiveColor)
+						globalMate := eval.POVMate(board.ActiveColor)
+						san := board.UCItoSAN(eval.UCIMove)
+
 						t := fmt.Sprintf("t=%v/%v", time.Since(start).Round(time.Second), check.MaxTime)
 						if delta >= check.DepthDelta {
-							logInfo(fmt.Sprintf("%s delta %d >= %d @ depth %d. move: %s cp: %d mate: %d", t, delta, check.DepthDelta, eval.Depth, eval.UCIMove, eval.POVCP(color), eval.POVMate(color)))
+							logInfo(fmt.Sprintf("%s delta %d >= %d @ depth %d. move: %7s %s cp: %d mate: %d", t, delta, check.DepthDelta, eval.Depth, san, eval.UCIMove, globalCP, globalMate))
 							ignoreDepthsGreaterThan = eval.Depth
 							a.input <- "stop"
 						} else {
-							logInfo(fmt.Sprintf("%s delta %d < %d @ depth %d. move: %s cp: %d mate: %d", t, delta, check.DepthDelta, eval.Depth, eval.UCIMove, eval.POVCP(color), eval.POVMate(color)))
+							logInfo(fmt.Sprintf("%s delta %d < %d  @ depth %d. move: %7s %s cp: %d mate: %d", t, delta, check.DepthDelta, eval.Depth, san, eval.UCIMove, globalCP, globalMate))
 						}
 					}
 				}
@@ -668,7 +673,7 @@ func (a *Analyzer) analyzePosition(ctx context.Context, fenPos string, check Bes
 	a.input <- fmt.Sprintf("setoption name MultiPV value 1")
 	a.input <- fmt.Sprintf("go depth %d movetime %d", check.MaxDepth, check.MaxTime.Milliseconds())
 
-	evals := a.getLines(ctx, check, board.ActiveColor)
+	evals := a.getLines(ctx, check, fenPos)
 	if len(evals) == 0 {
 		return nil, fmt.Errorf("no evaluations returned for fen '%s'", fenPos)
 	}
@@ -690,7 +695,7 @@ func (a *Analyzer) analyzePosition(ctx context.Context, fenPos string, check Bes
 		san := board.UCItoSAN(eval.UCIMove)
 		//newestEvals = append(newestEvals, eval.Clone())
 
-		logInfo(fmt.Sprintf("    depth: %d depth_delta: %d move: %-7s %s cp: %6d mate: %3d wc: %6.2f wc_diff: %6.2f", eval.Depth, eval.DepthDelta, san, eval.UCIMove, eval.POVCP(player), eval.POVMate(player), wc, diff))
+		logInfo(fmt.Sprintf("    depth: %2d depth_delta: %d move: %-7s %s cp: %6d mate: %3d wc: %6.2f wc_diff: %6.2f", eval.Depth, eval.DepthDelta, san, eval.UCIMove, eval.POVCP(player), eval.POVMate(player), wc, diff))
 	}
 	logInfo("")
 
