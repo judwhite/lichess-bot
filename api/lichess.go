@@ -80,6 +80,7 @@ func GetGames(username string, count int) (string, int, error) {
 	//q.Add("since", unixMilli(since))
 	//q.Add("analysed", "true") // TODO: may want to turn this off
 	//q.Add("until", unixMilli(until))
+	q.Add("sort", "dateAsc")
 	q.Add("perfType", allSpeeds)
 	q.Add("evals", "true")
 	q.Add("opening", "true")
