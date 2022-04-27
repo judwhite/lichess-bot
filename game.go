@@ -85,6 +85,7 @@ func (g *Game) Finish() {
 	g.input <- "stop"
 	if g.pondering {
 		g.pondering = false
+		g.ponder = ""
 		// consume 'bestmove' from pondering, so we don't accidentally consume it later
 		for line := range g.output {
 			if strings.HasPrefix(line, "bestmove") {
@@ -253,7 +254,7 @@ func (g *Game) playMove(ndjson []byte, state api.State) {
 	var ponderHit bool
 	var board fen.Board
 
-	if len(moves) > 2 {
+	if len(moves) > 1 {
 		opponentMoveUCI := moves[len(moves)-1]
 		board.Moves(moves[:len(moves)-1]...)
 		playedSAN := board.UCItoSAN(opponentMoveUCI)
@@ -379,7 +380,8 @@ func (g *Game) playMove(ndjson []byte, state api.State) {
 		}
 	}
 
-	if err := g.sendMoveToServer(bestMove); err != nil {
+	offerDraw := g.likelyDraw > 10 && board.FullMove > 40
+	if err := g.sendMoveToServer(bestMove, offerDraw); err != nil {
 		// '{"error":"Not your turn, or game already over"}'
 		// TODO: we should handle the opponent resigning, flagging or aborting while we're thinking
 		fmt.Printf("*** ERR: api.PlayMove: %v: %s\n", err, string(ndjson))
@@ -395,12 +397,12 @@ func (g *Game) playMove(ndjson []byte, state api.State) {
 		ts(), g.opponent.Name, g.opponent.Rating, ourTime, opponentTime, bestMoveSAN, g.humanEval)
 }
 
-func (g *Game) sendMoveToServer(bestMove string) error {
+func (g *Game) sendMoveToServer(bestMove string, offerDraw bool) error {
 	if bestMove == "" {
 		return nil
 	}
 
-	if err := api.PlayMove(g.gameID, bestMove, g.likelyDraw > 10); err != nil {
+	if err := api.PlayMove(g.gameID, bestMove, offerDraw); err != nil {
 		return err
 	}
 
