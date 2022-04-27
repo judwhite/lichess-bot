@@ -21,12 +21,10 @@ import (
 const SyzygyPath = "/home/jud/projects/tablebases/3-4-5:/home/jud/projects/tablebases/wdl6:/home/jud/projects/tablebases/dtz6" // TODO: get path from config file
 
 const startPosFEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
-const threads = 26
-
+const threads = 24
 const threadsHashMultiplier = 2048 // 24*2048 = 49152
-//const hashMemory = threads * threadsHashMultiplier
+const hashMemory = threads * threadsHashMultiplier
 
-const hashMemory = 95_000
 const multiPV = 8
 
 // TODO: put in config

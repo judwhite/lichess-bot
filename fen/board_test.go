@@ -143,8 +143,8 @@ func TestMakeMoves(t *testing.T) {
 	}{
 		{
 			start: startPosFEN,
-			moves: []string{"g1f3"},
-			want:  "rnbqkbnr/pppppppp/8/8/8/5N2/PPPPPPPP/RNBQKB1R b KQkq - 1 1",
+			moves: []string{"e2e4"},
+			want:  "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1",
 		},
 		{
 			start: startPosFEN,
@@ -164,7 +164,7 @@ func TestMakeMoves(t *testing.T) {
 		{
 			start: "r1bqkb1r/pp3ppp/2n1pn2/2pp4/3P4/2N1PN2/PPP1BPPP/R1BQ1RK1 b kq - 3 6",
 			moves: strings.Split("c6b4 h2h4 b7b6 h4h5 g7g5", " "),
-			want:  "r1bqkb1r/p4p1p/1p2pn2/2pp2pP/1n1P4/2N1PN2/PPP1BPP1/R1BQ1RK1 w kq g6 0 9",
+			want:  "r1bqkb1r/p4p1p/1p2pn2/2pp2pP/1n1P4/2N1PN2/PPP1BPP1/R1BQ1RK1 w kq - 0 9",
 		},
 		{
 			start: "r1bqkb1r/p4p1p/1p2pn2/2pp2pP/1n1P4/2N1PN2/PPP1BPP1/R1BQ1RK1 w kq g6 0 9",

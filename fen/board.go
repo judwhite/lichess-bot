@@ -148,8 +148,32 @@ func (b *Board) FENNoMoveClocks() string {
 	}
 	fen.WriteByte(' ')
 
-	// en passant target square
-	fen.WriteString(indexToSquare(b.EnPassantSquare))
+	// en passant target square (modified for domain reduction)
+	ep := b.EnPassantSquare
+	if ep == -1 {
+		fen.WriteByte('-')
+	} else {
+		enemyPiece := iif[byte](b.ActiveColor == WhitePieces, 'p', 'P')
+
+		var flag bool
+		file := ep % 8
+		if file != 0 {
+			if b.Pos[ep-1] == enemyPiece {
+				flag = true
+			}
+		}
+		if file != 7 {
+			if b.Pos[ep+1] == enemyPiece {
+				flag = true
+			}
+		}
+
+		if !flag {
+			fen.WriteByte('-')
+		} else {
+			fen.WriteString(indexToSquare(b.EnPassantSquare))
+		}
+	}
 
 	return fen.String()
 }
@@ -714,10 +738,6 @@ func indexesToUCI(from, to int) string {
 }
 
 func indexToSquare(index int) string {
-	if index == -1 {
-		return "-"
-	}
-
 	file := byte('a' + index%8)
 	rank := byte('8' - index/8)
 	return string([]byte{file, rank})
@@ -1095,4 +1115,11 @@ func abs(n int) int {
 		return -n
 	}
 	return n
+}
+
+func iif[T any](condition bool, ifTrue, ifFalse T) T {
+	if condition {
+		return ifTrue
+	}
+	return ifFalse
 }

@@ -29,7 +29,7 @@ func TestPGNtoMoves(t *testing.T) {
 			t.Parallel()
 
 			// act
-			moves, err := PGNtoMoves(c.PGN)
+			_, moves, err := PGNtoMoves(c.PGN)
 			if err != nil {
 				t.Error(err)
 				return
@@ -136,7 +136,7 @@ Ke1 Rh2 38. Rxc7+ Kd8 39. Rc4 Rb2 40. Rd1+ Ke7 41. Rc7+ Ke6 42. Rd6+ Kf5
 43. Rd2 Rbxd2 44. Rxf7+ Kg4 45. Rf6 Ra2 46. Rxb6 Rh1# 0-1`
 
 	for i := 0; i < b.N; i++ {
-		_, err := PGNtoMoves(pgn)
+		_, _, err := PGNtoMoves(pgn)
 		if err != nil {
 			b.Fatal(err)
 		}
