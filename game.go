@@ -251,27 +251,33 @@ func (g *Game) playMove(ndjson []byte, state api.State) {
 	}
 
 	var ponderHit bool
+	var board fen.Board
 
 	if len(moves) > 2 {
 		opponentMoveUCI := moves[len(moves)-1]
+		board.Moves(moves[:len(moves)-1]...)
+		playedSAN := board.UCItoSAN(opponentMoveUCI)
+
 		if g.ponder != "" && g.pondering {
-			fmt.Printf("%s played: %s predicted: %s\n", ts(), opponentMoveUCI, g.ponder)
+			predictedSAN := board.UCItoSAN(g.ponder)
+			fmt.Printf("%s played: %s predicted: %s\n", ts(), playedSAN, predictedSAN)
 			if g.ponder == opponentMoveUCI {
 				g.ponderHits++
 				ponderHit = true
 			}
 			g.ponder = ""
 		} else {
-			fmt.Printf("%s played: %s\n", ts(), opponentMoveUCI)
+			fmt.Printf("%s played: %s\n", ts(), playedSAN)
 		}
+		board.Moves(opponentMoveUCI)
+	} else {
+		board.Moves(moves...)
 	}
 
 	var bestMove string
 
 	// check book
-	var b fen.Board
-	b.Moves(moves...)
-	key := polyglot.Key(b)
+	key := polyglot.Key(board)
 	bookMoves, ok := g.book[key]
 
 	if ok {
@@ -280,14 +286,14 @@ func (g *Game) playMove(ndjson []byte, state api.State) {
 
 		bestMove = bookMove.UCIMove
 		if bestMove == "" {
-			bestMove = polyglot.ToUCIMove(b, bookMove.Move)
+			bestMove = polyglot.ToUCIMove(board, bookMove.Move)
 			bookMove.UCIMove = bestMove
 		}
 		if bookMove.FEN == "" {
-			bookMove.FEN = b.FENNoMoveClocks()
+			bookMove.FEN = board.FENNoMoveClocks()
 		}
 
-		fmt.Printf("!!! ^^^ !!! ^^^ %s %s %s came from book\n", b.FEN(), b.UCItoSAN(bestMove), bestMove)
+		fmt.Printf("!!! ^^^ !!! ^^^ %s %s %s came from book\n", board.FEN(), board.UCItoSAN(bestMove), bestMove)
 		g.bookMovesPlayed++
 	} else {
 		if ponderHit {
@@ -384,8 +390,9 @@ func (g *Game) playMove(ndjson []byte, state api.State) {
 
 	g.maybeGiveTime(ourTime, opponentTime)
 
+	bestMoveSAN := board.UCItoSAN(bestMove)
 	fmt.Printf("%s game: %s (%d) our_time: %6v opp_time: %6v move: %s eval: %s\n",
-		ts(), g.opponent.Name, g.opponent.Rating, ourTime, opponentTime, bestMove, g.humanEval)
+		ts(), g.opponent.Name, g.opponent.Rating, ourTime, opponentTime, bestMoveSAN, g.humanEval)
 }
 
 func (g *Game) sendMoveToServer(bestMove string) error {

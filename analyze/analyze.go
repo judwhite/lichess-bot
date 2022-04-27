@@ -390,7 +390,7 @@ loop:
 						globalMate := eval.POVMate(board.ActiveColor)
 						san := board.UCItoSAN(eval.UCIMove)
 
-						t := fmt.Sprintf("t=%v/%v", time.Since(start).Round(time.Second), check.MaxTime)
+						t := fmt.Sprintf("t=%5v/%v", time.Since(start).Round(time.Second), check.MaxTime)
 						if delta >= check.DepthDelta {
 							logInfo(fmt.Sprintf("%s delta %d >= %d @ depth %d. move: %7s %s cp: %d mate: %d", t, delta, check.DepthDelta, eval.Depth, san, eval.UCIMove, globalCP, globalMate))
 							ignoreDepthsGreaterThan = eval.Depth
@@ -695,7 +695,7 @@ func (a *Analyzer) analyzePosition(ctx context.Context, fenPos string, check Bes
 		san := board.UCItoSAN(eval.UCIMove)
 		//newestEvals = append(newestEvals, eval.Clone())
 
-		logInfo(fmt.Sprintf("    depth: %2d depth_delta: %d move: %-7s %s cp: %6d mate: %3d wc: %6.2f wc_diff: %6.2f", eval.Depth, eval.DepthDelta, san, eval.UCIMove, eval.POVCP(player), eval.POVMate(player), wc, diff))
+		logInfo(fmt.Sprintf("    depth: %2d depth_delta: %2d move: %-7s %s cp: %6d mate: %3d wc: %6.2f wc_diff: %6.2f", eval.Depth, eval.DepthDelta, san, eval.UCIMove, eval.POVCP(player), eval.POVMate(player), wc, diff))
 	}
 	logInfo("")
 
