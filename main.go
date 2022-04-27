@@ -21,7 +21,8 @@ import (
 func main() {
 	var (
 		botFlag              bool
-		epdFilename          string
+		updateEPDFilename    string
+		dedupeEPDFilename    string
 		freqPGNFilename      string
 		freqMergeEPDFilename string
 		freqCount            int
@@ -32,7 +33,8 @@ func main() {
 
 	var flags flag.FlagSet
 	flags.BoolVar(&botFlag, "bot", false, "runs the bot")
-	flags.StringVar(&epdFilename, "update-epd", "", "run analysis and update an epd file")
+	flags.StringVar(&updateEPDFilename, "update-epd", "", "run analysis and update an EPD file")
+	flags.StringVar(&dedupeEPDFilename, "dedupe-epd", "", "show duplicates in EPD file")
 	flags.StringVar(&freqPGNFilename, "freq-pgn", "", "show most common positions from a PGN file in EPD format (see also freq-count)")
 	flags.StringVar(&freqMergeEPDFilename, "freq-merge-epd", "", "merge positions with an EPD file. only new positions are added.")
 	flags.IntVar(&freqCount, "freq-count", 3, "minimum times a position must occur (see freq-pgn)")
@@ -57,15 +59,22 @@ func main() {
 		return
 	}
 
-	if epdFilename != "" {
+	if updateEPDFilename != "" {
 		opts := epd.AnalysisOptions{
-			MinDepth:   32,
+			MinDepth:   45,
 			MaxDepth:   80,
-			MinTime:    10 * time.Second,
-			MaxTime:    5 * time.Minute,
-			DepthDelta: 5,
+			MinTime:    30 * time.Second,
+			MaxTime:    10 * time.Minute,
+			DepthDelta: 6,
 		}
-		if err := epd.UpdateFile(context.Background(), epdFilename, opts); err != nil {
+		if err := epd.UpdateFile(context.Background(), updateEPDFilename, opts); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
+
+	if dedupeEPDFilename != "" {
+		if err := epd.Dedupe(dedupeEPDFilename); err != nil {
 			log.Fatal(err)
 		}
 		return

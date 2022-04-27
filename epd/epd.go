@@ -264,6 +264,48 @@ func ParseText(text string) *File {
 	return file
 }
 
+func Dedupe(filename string) error {
+	file, err := LoadFile(filename)
+	if err != nil {
+		return err
+	}
+
+	seen := make(map[string]int)
+	dupes := make(map[string][]int)
+
+	for i := 0; i < len(file.Lines); i++ {
+		line := file.Lines[i]
+		if line.FEN == "" {
+			continue
+		}
+
+		if prevIdx, ok := seen[line.FEN]; !ok {
+			seen[line.FEN] = i
+		} else {
+			if _, ok := dupes[line.FEN]; !ok {
+				dupes[line.FEN] = append(dupes[line.FEN], prevIdx, i)
+			} else {
+				dupes[line.FEN] = append(dupes[line.FEN], i)
+			}
+		}
+	}
+
+	if len(dupes) == 0 {
+		logInfo("no duplicates found")
+		return nil
+	}
+
+	for fenKey, indexes := range dupes {
+		logInfo(fmt.Sprintf("FEN: %s", fenKey))
+		for _, idx := range indexes {
+			logInfo(file.Lines[idx].String())
+		}
+		logInfo("")
+	}
+
+	return nil
+}
+
 func UpdateFile(ctx context.Context, filename string, opts AnalysisOptions) error {
 	analysisOpts := analyze.AnalysisOptions{
 		MinDepth:   opts.MinDepth,
