@@ -381,8 +381,6 @@ func PlayMove(gameID, move string, draw bool) error {
 }
 
 func Chat(gameID, room, text string) error {
-	fmt.Printf("%s REQ: %s\n", ts(), "Chat")
-
 	endpoint := fmt.Sprintf("https://lichess.org/api/bot/game/%s/chat", gameID)
 
 	data := url.Values{}

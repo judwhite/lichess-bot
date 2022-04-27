@@ -102,6 +102,7 @@ func (g *Game) handleChat(ndjson []byte) {
 	if err := json.Unmarshal(ndjson, &chat); err != nil {
 		fmt.Printf("%s ERR: chatLine: %v\n", ts(), err)
 	}
+	fmt.Printf("%s CHAT: #%s <%s> %s\n", ts(), chat.Room, chat.Username, chat.Text)
 	if strings.ToLower(chat.Username) == botID {
 		return
 	}
