@@ -43,7 +43,7 @@ func (f *File) Contains(fenKey string) bool {
 	return false
 }
 
-func (f *File) Add(fenKey string, ops ...Operation) {
+func (f *File) Add(fenKey string, ops ...Operation) *LineItem {
 	fenKey = fenToKey(fenKey)
 	line := &LineItem{FEN: fenKey}
 	for _, op := range ops {
@@ -51,6 +51,22 @@ func (f *File) Add(fenKey string, ops ...Operation) {
 	}
 	f.Lines = append(f.Lines, line)
 	line.RawText = line.String()
+	return line
+}
+
+func (f *File) Find(fenKey string) string {
+	fenKey = fenToKey(fenKey)
+	if len(fenKey) == 0 {
+		return ""
+	}
+
+	for _, item := range f.Lines {
+		if item.FEN == fenKey {
+			return item.String()
+		}
+	}
+
+	return ""
 }
 
 func (f *File) Save(filename string, backup bool) error {
@@ -273,6 +289,7 @@ func Dedupe(filename string) error {
 	seen := make(map[string]int)
 	dupes := make(map[string][]int)
 
+	removed := 0
 	for i := 0; i < len(file.Lines); i++ {
 		line := file.Lines[i]
 		if line.FEN == "" {
@@ -283,10 +300,37 @@ func Dedupe(filename string) error {
 			seen[line.FEN] = i
 		} else {
 			if _, ok := dupes[line.FEN]; !ok {
+				if line.String() == file.Lines[prevIdx].String() {
+					file.Lines = append(file.Lines[:i], file.Lines[i+1:]...)
+					i--
+					removed++
+					continue
+				}
 				dupes[line.FEN] = append(dupes[line.FEN], prevIdx, i)
 			} else {
-				dupes[line.FEN] = append(dupes[line.FEN], i)
+				prevDupes := dupes[line.FEN]
+				found := false
+				for j := 0; j < len(prevDupes); j++ {
+					prevIdx := prevDupes[j]
+					if line.String() == file.Lines[prevIdx].String() {
+						file.Lines = append(file.Lines[:i], file.Lines[i+1:]...)
+						i--
+						removed++
+						found = true
+						break
+					}
+				}
+				if !found {
+					dupes[line.FEN] = append(dupes[line.FEN], i)
+				}
 			}
+		}
+	}
+
+	if removed > 0 {
+		fmt.Printf("removed %d duplicate(s)\n", removed)
+		if err := file.Save(filename, true); err != nil {
+			return err
 		}
 	}
 
@@ -295,12 +339,10 @@ func Dedupe(filename string) error {
 		return nil
 	}
 
-	for fenKey, indexes := range dupes {
-		logInfo(fmt.Sprintf("FEN: %s", fenKey))
+	for _, indexes := range dupes {
 		for _, idx := range indexes {
-			logInfo(file.Lines[idx].String())
+			fmt.Println(file.Lines[idx].String())
 		}
-		logInfo("")
 	}
 
 	return nil
