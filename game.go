@@ -33,6 +33,11 @@ type Game struct {
 
 	book            map[uint64][]*BookEntry
 	bookMovesPlayed int
+	ponder          string
+	pondering       bool
+	ponderHits      int
+	totalPonders    int
+	humanEval       string
 }
 
 func NewGame(gameID string, input chan<- string, output <-chan string, book map[uint64][]*BookEntry) *Game {
@@ -77,7 +82,18 @@ func (g *Game) StreamGameEvents() {
 func (g *Game) Finish() {
 	g.Lock()
 	g.finished = true
+	g.input <- "stop"
+	if g.pondering {
+		g.pondering = false
+		// consume 'bestmove' from pondering, so we don't accidentally consume it later
+		for line := range g.output {
+			if strings.HasPrefix(line, "bestmove") {
+				break
+			}
+		}
+	}
 	fmt.Printf("%d book move(s) played\n", g.bookMovesPlayed)
+	fmt.Printf("%d/%d predictions played\n", g.ponderHits, g.totalPonders)
 	g.Unlock()
 }
 
@@ -233,6 +249,22 @@ func (g *Game) playMove(ndjson []byte, state api.State) {
 		return
 	}
 
+	var ponderHit bool
+
+	if len(moves) > 2 {
+		opponentMoveUCI := moves[len(moves)-1]
+		if g.ponder != "" && g.pondering {
+			fmt.Printf("%s played: %s predicted: %s\n", ts(), opponentMoveUCI, g.ponder)
+			if g.ponder == opponentMoveUCI {
+				g.ponderHits++
+				ponderHit = true
+			}
+			g.ponder = ""
+		} else {
+			fmt.Printf("%s played: %s\n", ts(), opponentMoveUCI)
+		}
+	}
+
 	var bestMove string
 
 	// check book
@@ -257,61 +289,127 @@ func (g *Game) playMove(ndjson []byte, state api.State) {
 		fmt.Printf("!!! ^^^ !!! ^^^ %s %s %s came from book\n", b.FEN(), b.UCItoSAN(bestMove), bestMove)
 		g.bookMovesPlayed++
 	} else {
-		pos := fmt.Sprintf("position fen %s moves %s", startPosFEN, state.Moves)
-		goCmd := fmt.Sprintf("go wtime %d winc %d btime %d binc %d",
-			state.WhiteTime, state.WhiteInc,
-			state.BlackTime, state.BlackInc,
-		)
+		if ponderHit {
+			g.input <- "ponderhit"
+			g.pondering = false
+		} else {
+			g.input <- "stop"
+			if g.pondering {
+				g.pondering = false
+				// consume 'bestmove' from pondering, so we don't accidentally consume it later
+				for line := range g.output {
+					if strings.HasPrefix(line, "bestmove") {
+						break
+					}
+				}
+			}
+			var pos string
+			if state.Moves == "" {
+				pos = fmt.Sprintf("position fen %s", startPosFEN)
+			} else {
+				pos = fmt.Sprintf("position fen %s moves %s", startPosFEN, state.Moves)
+			}
 
-		g.input <- pos
-		g.input <- goCmd
+			goCmd := fmt.Sprintf("go wtime %d winc %d btime %d binc %d",
+				state.WhiteTime, state.WhiteInc,
+				state.BlackTime, state.BlackInc,
+			)
+
+			g.input <- pos
+			g.input <- goCmd
+		}
+
+		start := time.Now()
 
 		fmt.Printf("%s thinking...\n", ts())
 
 		for item := range g.output {
-			if strings.HasPrefix(item, "bestmove ") {
+			// bestmove and ponder
+			if strings.HasPrefix(item, "bestmove") {
 				p := strings.Split(item, " ")
 				bestMove = p[1]
-				g.input <- "stop"
-				break
-			} else if strings.Contains(item, " eval ") {
-				if strings.Contains(item, "eval 0.00") {
-					g.likelyDraw++
-				} else {
-					g.likelyDraw = 0
+				for i := 2; i < len(p)-1; i++ {
+					if p[i] == "ponder" {
+						g.ponder = p[i+1]
+						g.totalPonders++
+
+						var pos string
+						if state.Moves == "" {
+							pos = fmt.Sprintf("position fen %s moves %s %s", startPosFEN, bestMove, g.ponder)
+						} else {
+							pos = fmt.Sprintf("position fen %s moves %s %s %s", startPosFEN, state.Moves, bestMove, g.ponder)
+						}
+
+						var goCmd string
+						elapsed := int(time.Since(start).Milliseconds())
+						if g.playerNumber == 0 {
+							goCmd = fmt.Sprintf("go ponder wtime %d winc %d btime %d binc %d",
+								state.WhiteTime-elapsed, state.WhiteInc,
+								state.BlackTime, state.BlackInc,
+							)
+						} else {
+							goCmd = fmt.Sprintf("go ponder wtime %d winc %d btime %d binc %d",
+								state.WhiteTime, state.WhiteInc,
+								state.BlackTime-elapsed, state.BlackInc,
+							)
+						}
+
+						g.input <- pos
+						g.input <- goCmd
+
+						g.pondering = true
+					} else if p[i] == "eval" {
+						g.humanEval = p[i+1]
+						if g.humanEval == "0.00" {
+							g.likelyDraw++
+						} else {
+							g.likelyDraw = 0
+						}
+					}
 				}
+				break
 			}
 		}
 	}
 
-	if bestMove != "" {
-		if err := api.PlayMove(g.gameID, bestMove, g.likelyDraw > 10); err != nil {
-			// '{"error":"Not your turn, or game already over"}'
-			// TODO: we should handle the opponent resigning, flagging or aborting while we're thinking
-			fmt.Printf("*** ERR: api.PlayMove: %v: %s\n", err, string(ndjson))
+	if err := g.sendMoveToServer(bestMove); err != nil {
+		// '{"error":"Not your turn, or game already over"}'
+		// TODO: we should handle the opponent resigning, flagging or aborting while we're thinking
+		fmt.Printf("*** ERR: api.PlayMove: %v: %s\n", err, string(ndjson))
 
-			g.Finish()
-			return
-		}
+		g.Finish()
+		return
+	}
 
-		fmt.Printf("%s game: %s move: %s\n", ts(), g.gameID, bestMove)
+	g.maybeGiveTime(ourTime, opponentTime)
 
-		if g.gaveTime {
-			fmt.Printf("%s our_time: %v opp_time: %v gave_time: %v\n", ts(), ourTime, opponentTime, g.gaveTime)
-		} else {
-			fmt.Printf("%s our_time: %v opp_time: %v\n", ts(), ourTime, opponentTime)
-		}
+	fmt.Printf("%s game: %s (%d) our_time: %6v opp_time: %6v move: %s eval: %s\n",
+		ts(), g.opponent.Name, g.opponent.Rating, ourTime, opponentTime, bestMove, g.humanEval)
+}
 
-		if opponentTime < 15*time.Second && ourTime > opponentTime && !g.gaveTime && g.opponent.Title != "BOT" {
-			g.gaveTime = true
-			fmt.Printf("%s *** attempting to give time!\n", ts())
-			for i := 0; i < 6; i++ {
-				go func() {
-					if err := api.AddTime(g.gameID, 15); err != nil {
-						log.Printf("AddTime: %v\n", err)
-					}
-				}()
-			}
+func (g *Game) sendMoveToServer(bestMove string) error {
+	if bestMove == "" {
+		return nil
+	}
+
+	if err := api.PlayMove(g.gameID, bestMove, g.likelyDraw > 10); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (g *Game) maybeGiveTime(ourTime, opponentTime time.Duration) {
+	// add time for human players :D
+	if opponentTime < 15*time.Second && ourTime > opponentTime && !g.gaveTime && g.opponent.Title != "BOT" {
+		g.gaveTime = true
+		fmt.Printf("%s *** attempting to give time!\n", ts())
+		for i := 0; i < 6; i++ {
+			go func() {
+				if err := api.AddTime(g.gameID, 15); err != nil {
+					log.Printf("AddTime: %v\n", err)
+				}
+			}()
 		}
 	}
 }

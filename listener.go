@@ -70,6 +70,7 @@ func New(ctx context.Context, input chan<- string, output <-chan string, onlyUse
 		onlyUser: strings.ToLower(onlyUser),
 	}
 	input <- "uci"
+	input <- "setoption name Ponder value true"
 	input <- fmt.Sprintf("setoption name SyzygyPath value %s", analyze.SyzygyPath)
 
 	if err := l.importBook("troll.epd"); err != nil {
@@ -159,11 +160,6 @@ func (l *Listener) importBook(filename string) error {
 	}
 
 	if len(l.book) > 0 {
-		for _, v := range l.book {
-			for _, item := range v {
-				fmt.Printf("%s bm %s\n", item.FEN, item.UCIMove)
-			}
-		}
 		fmt.Printf("%s book loaded. positions: %d\n", ts(), len(l.book))
 	}
 
