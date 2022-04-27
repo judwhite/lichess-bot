@@ -478,6 +478,26 @@ type Analyzer struct {
 	stockfishStarted int64
 }
 
+func (a *Analyzer) AnalyzePGNFile(ctx context.Context, opts AnalysisOptions, pgnFilename string) error {
+	db, err := fen.LoadPGNDatabase(pgnFilename)
+	if err != nil {
+		return err
+	}
+
+	for _, game := range db.Games {
+		moves := make([]string, 0, len(game.Moves))
+		for _, move := range game.Moves {
+			moves = append(moves, move.UCI)
+		}
+
+		if err := a.AnalyzeGame(ctx, opts, moves); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
 func (a *Analyzer) AnalyzeGame(ctx context.Context, opts AnalysisOptions, moves []string) error {
 	logInfo(fmt.Sprintf("start game analysis, %d moves (%d plies)", (len(moves)+1)/2, len(moves)))
 
@@ -527,7 +547,7 @@ gameMovesLoop:
 			pgn := evalToPGN(startFEN, 0, movesEval, false)
 			logMultiline(pgn)
 			if err := ioutil.WriteFile("eval.pgn", []byte(pgn), 0644); err != nil {
-				log.Fatal(err)
+				return err
 			}
 
 			tbl := debugEvalTable(startFEN, movesEval)
@@ -535,7 +555,7 @@ gameMovesLoop:
 		}
 
 		// playerMoveUCI will come back
-		evals, err := a.AnalyzePosition(ctx, opts, board.FEN())
+		evals, err := a.AnalyzePosition(ctx, opts, board.FEN(), playerMoveUCI)
 		if err != nil {
 			return err
 		}
@@ -566,6 +586,10 @@ gameMovesLoop:
 				playerMove = checkMove.Clone()
 				break
 			}
+		}
+
+		if playerMove.UCIMove == "" {
+			panic(fmt.Errorf("playerMove.UCIMove is empty"))
 		}
 
 		if playerMove.Score() >= bestMove.Score() {
@@ -610,7 +634,7 @@ gameMovesLoop:
 	return nil
 }
 
-func (a *Analyzer) AnalyzePosition(ctx context.Context, opts AnalysisOptions, fenPos string) ([]Eval, error) {
+func (a *Analyzer) AnalyzePosition(ctx context.Context, opts AnalysisOptions, fenPos string, moves ...string) ([]Eval, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -627,7 +651,7 @@ func (a *Analyzer) AnalyzePosition(ctx context.Context, opts AnalysisOptions, fe
 
 	logInfo(fmt.Sprintf("start fen '%s' min_depth=%d", fenPos, opts.MinDepth))
 
-	evals, err = a.analyzePosition(ctx, opts, fenPos)
+	evals, err = a.analyzePosition(ctx, opts, fenPos, moves)
 	if err != nil {
 		return nil, fmt.Errorf("searchmoves '%v': %v", searchMoves, err)
 	}
@@ -652,7 +676,7 @@ func (a *Analyzer) waitReady() {
 	}
 }
 
-func (a *Analyzer) analyzePosition(ctx context.Context, opts AnalysisOptions, fenPos string) ([]Eval, error) {
+func (a *Analyzer) analyzePosition(ctx context.Context, opts AnalysisOptions, fenPos string, moves []string) ([]Eval, error) {
 	board := fen.FENtoBoard(fenPos)
 
 	if board.IsMate() {
@@ -660,7 +684,11 @@ func (a *Analyzer) analyzePosition(ctx context.Context, opts AnalysisOptions, fe
 	}
 
 	a.input <- fmt.Sprintf("setoption name MultiPV value 1")
-	a.input <- fmt.Sprintf("go depth %d movetime %d", opts.MaxDepth, opts.MaxTime.Milliseconds())
+	if len(moves) != 0 {
+		a.input <- fmt.Sprintf("go depth %d movetime %d searchmoves %s", opts.MaxDepth, opts.MaxTime.Milliseconds(), strings.Join(moves, " "))
+	} else {
+		a.input <- fmt.Sprintf("go depth %d movetime %d", opts.MaxDepth, opts.MaxTime.Milliseconds())
+	}
 
 	evals := a.getLines(ctx, opts, fenPos)
 	if len(evals) == 0 {
