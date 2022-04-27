@@ -39,6 +39,10 @@ func (b *Book) Get(fenKey string) ([]*BookEntry, bool) {
 		be, ok = b.polyglotBook[key]
 		if ok {
 			delete(b.polyglotBook, key)
+			for _, entry := range be {
+				uciMove := toUCIMove(board, entry.polyglotMove)
+				entry.UCIMove = uciMove
+			}
 			b.book[fenKey] = be
 			return be, true
 		}
@@ -66,11 +70,11 @@ func (b *Book) PosCount() int {
 }
 
 type BookEntry struct {
-	Move uint16 `json:"move"`
-	Freq uint16 `json:"freq"`
-
 	FEN     string `json:"fen"`
 	UCIMove string `json:"uci"`
+	Freq    uint16 `json:"freq"`
+
+	polyglotMove uint16
 }
 
 func LoadBook(filename string) (*Book, error) {
@@ -111,7 +115,7 @@ func LoadBook(filename string) (*Book, error) {
 		move := (uint16(buf[8]) << 8) | uint16(buf[9])
 		freq := (uint16(buf[10]) << 8) | uint16(buf[11])
 
-		book.polyglotBook[key] = append(book.polyglotBook[key], &BookEntry{Move: move, Freq: freq})
+		book.polyglotBook[key] = append(book.polyglotBook[key], &BookEntry{polyglotMove: move, Freq: freq})
 	}
 
 	return &book, nil

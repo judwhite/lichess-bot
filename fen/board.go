@@ -493,10 +493,10 @@ func (b *Board) Moves(moves ...string) *Board {
 	return b
 }
 
-func FENtoBoard(fen string) Board {
+func FENtoBoard(fen string) *Board {
 	var b Board
 	b.LoadFEN(fen)
-	return b
+	return &b
 }
 
 func (b *Board) init() {

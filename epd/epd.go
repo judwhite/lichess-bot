@@ -474,12 +474,7 @@ func fileExists(filename string) bool {
 }
 
 func fenToKey(fenKey string) string {
-	fenKey = strings.TrimSpace(fenKey)
-	parts := strings.Split(fenKey, " ")
-	if len(parts) <= 4 {
-		return fenKey
-	}
-	return strings.Join(parts[:4], " ")
+	return fen.FENtoBoard(fenKey).FENNoMoveClocks()
 }
 
 func logInfo(msg string) {

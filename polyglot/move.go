@@ -7,7 +7,7 @@ import (
 
 var promotionPiece = []string{"", "n", "b", "r", "q"}
 
-func ToUCIMove(b fen.Board, v uint16) string {
+func toUCIMove(b *fen.Board, v uint16) string {
 	if v == 0 {
 		return ""
 	}

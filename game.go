@@ -283,15 +283,7 @@ func (g *Game) playMove(ndjson []byte, state api.State) {
 	if ok {
 		n := rand.Intn(len(bookMoves)) // TODO: use freq field
 		bookMove := bookMoves[n]
-
 		bestMove = bookMove.UCIMove
-		if bestMove == "" {
-			bestMove = polyglot.ToUCIMove(board, bookMove.Move)
-			bookMove.UCIMove = bestMove
-		}
-		if bookMove.FEN == "" {
-			bookMove.FEN = board.FENNoMoveClocks()
-		}
 
 		fmt.Printf("!!! ^^^ !!! ^^^ %s %s %s came from book\n", board.FEN(), board.UCItoSAN(bestMove), bestMove)
 		g.bookMovesPlayed++

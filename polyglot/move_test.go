@@ -49,7 +49,7 @@ func TestToUCIMove(t *testing.T) {
 			board := fen.FENtoBoard(c.fen)
 
 			// act
-			uciMove := ToUCIMove(board, c.move)
+			uciMove := toUCIMove(board, c.move)
 
 			// assert
 			if c.want != uciMove {

@@ -63,6 +63,9 @@ func New(ctx context.Context, input chan<- string, output <-chan string, onlyUse
 	if err := l.importBook("troll.epd"); err != nil {
 		log.Fatal(err)
 	}
+	if l.book != nil {
+		fmt.Printf("book loaded, %d positions\n", l.book.PosCount())
+	}
 
 	if onlyUser == "" {
 		go func() {
