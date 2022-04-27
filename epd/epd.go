@@ -12,6 +12,7 @@ import (
 
 	"trollfish-lichess/analyze"
 	"trollfish-lichess/fen"
+	"trollfish-lichess/polyglot"
 )
 
 const (
@@ -483,4 +484,25 @@ func fenToKey(fenKey string) string {
 
 func logInfo(msg string) {
 	_, _ = fmt.Fprintf(os.Stderr, "%s\n", strings.TrimRight(msg, "\n"))
+}
+
+func LoadBook(filename string) (*polyglot.Book, error) {
+	file, err := LoadFile(filename)
+	if err != nil {
+		return nil, err
+	}
+
+	book := polyglot.NewBook()
+	for _, item := range file.Lines {
+		bestMoveSAN := item.BestMove()
+		if bestMoveSAN == "" {
+			continue
+		}
+
+		if err := book.Add(item.FEN, bestMoveSAN); err != nil {
+			return nil, err
+		}
+	}
+
+	return book, nil
 }

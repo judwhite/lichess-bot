@@ -1,15 +1,12 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"io/ioutil"
 	"log"
 	"math/rand"
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -19,7 +16,6 @@ import (
 	"trollfish-lichess/analyze"
 	"trollfish-lichess/api"
 	"trollfish-lichess/epd"
-	"trollfish-lichess/fen"
 	"trollfish-lichess/polyglot"
 )
 
@@ -31,7 +27,7 @@ const minRating = 2100
 type Listener struct {
 	ctx context.Context
 
-	book map[uint64][]*BookEntry
+	book *polyglot.Book
 
 	activeGameMtx sync.Mutex
 	activeGame    *Game
@@ -51,14 +47,6 @@ type Listener struct {
 	output <-chan string
 }
 
-type BookEntry struct {
-	Move uint16 `json:"move"`
-	Freq uint16 `json:"freq"`
-
-	FEN     string `json:"fen"`
-	UCIMove string `json:"uci"`
-}
-
 func New(ctx context.Context, input chan<- string, output <-chan string, onlyUser, challenge string) *Listener {
 	l := Listener{
 		ctx:      ctx,
@@ -66,7 +54,6 @@ func New(ctx context.Context, input chan<- string, output <-chan string, onlyUse
 		output:   output,
 		declined: make(chan api.Challenge, 512),
 		accepted: make(chan api.GameEventInfo, 512),
-		book:     make(map[uint64][]*BookEntry),
 		onlyUser: strings.ToLower(onlyUser),
 	}
 	input <- "uci"
@@ -103,64 +90,18 @@ func (l *Listener) importBook(filename string) error {
 	fmt.Printf("%s loading book %s...\n", ts(), filename)
 	ext := filepath.Ext(filename)
 
-	if ext == ".bin" {
-		fp, err := os.Open(filename)
-		if err != nil {
-			return err
-		}
-		defer fp.Close()
+	var err error
 
-		r := bufio.NewReaderSize(fp, 16384)
-		buf := make([]byte, 32)
-		for {
-			n, err := r.Read(buf)
-			if err == io.EOF {
-				break
-			} else if err != nil {
-				return err
-			}
-
-			if n != 32 {
-				log.Fatalf("n=%d, need to do something about this", n)
-			}
-
-			key := (uint64(buf[0]) << (7 * 8)) +
-				(uint64(buf[1]) << (6 * 8)) +
-				(uint64(buf[2]) << (5 * 8)) +
-				(uint64(buf[3]) << (4 * 8)) +
-				(uint64(buf[4]) << (3 * 8)) +
-				(uint64(buf[5]) << (2 * 8)) +
-				(uint64(buf[6]) << (1 * 8)) +
-				uint64(buf[7])
-
-			move := (uint16(buf[8]) << 8) | uint16(buf[9])
-			freq := (uint16(buf[10]) << 8) | uint16(buf[11])
-
-			l.book[key] = append(l.book[key], &BookEntry{Move: move, Freq: freq})
-		}
-	} else if ext == ".epd" {
-		file, err := epd.LoadFile(filename)
-		if err != nil {
-			log.Fatal(err)
-		}
-
-		for _, item := range file.Lines {
-			b := fen.FENtoBoard(item.FEN)
-			key := polyglot.Key(b)
-			bestMoveSAN := item.BestMove()
-			if bestMoveSAN == "" {
-				continue
-			}
-			uci, err := b.SANtoUCI(bestMoveSAN)
-			if err != nil {
-				return err
-			}
-			l.book[key] = append(l.book[key], &BookEntry{FEN: item.FEN, Move: 0, Freq: 0, UCIMove: uci})
-		}
+	switch ext {
+	case ".bin":
+		l.book, err = polyglot.LoadBook(filename)
+	case ".epd":
+		l.book, err = epd.LoadBook(filename)
+	default:
+		return fmt.Errorf("unknown book extension '%s'", ext)
 	}
-
-	if len(l.book) > 0 {
-		fmt.Printf("%s book loaded. positions: %d\n", ts(), len(l.book))
+	if err != nil {
+		return err
 	}
 
 	return nil

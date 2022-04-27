@@ -31,7 +31,7 @@ type Game struct {
 	input  chan<- string
 	output <-chan string
 
-	book            map[uint64][]*BookEntry
+	book            *polyglot.Book
 	bookMovesPlayed int
 	ponder          string
 	pondering       bool
@@ -40,7 +40,7 @@ type Game struct {
 	humanEval       string
 }
 
-func NewGame(gameID string, input chan<- string, output <-chan string, book map[uint64][]*BookEntry) *Game {
+func NewGame(gameID string, input chan<- string, output <-chan string, book *polyglot.Book) *Game {
 	return &Game{
 		gameID:       gameID,
 		playerNumber: -1,
@@ -278,8 +278,7 @@ func (g *Game) playMove(ndjson []byte, state api.State) {
 	var bestMove string
 
 	// check book
-	key := polyglot.Key(board)
-	bookMoves, ok := g.book[key]
+	bookMoves, ok := g.book.Get(board.FEN())
 
 	if ok {
 		n := rand.Intn(len(bookMoves)) // TODO: use freq field
