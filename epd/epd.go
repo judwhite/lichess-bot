@@ -265,6 +265,14 @@ func ParseText(text string) *File {
 }
 
 func UpdateFile(ctx context.Context, filename string, opts AnalysisOptions) error {
+	analysisOpts := analyze.AnalysisOptions{
+		MinDepth:   opts.MinDepth,
+		MaxDepth:   opts.MaxDepth,
+		MinTime:    opts.MinTime,
+		MaxTime:    opts.MaxTime,
+		DepthDelta: opts.DepthDelta,
+	}
+
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -282,7 +290,7 @@ func UpdateFile(ctx context.Context, filename string, opts AnalysisOptions) erro
 	filtered := func() []*LineItem {
 		var items []*LineItem
 		for _, item := range file.Lines {
-			if item.FEN == "" || item.ACD() >= opts.MinDepth {
+			if item.FEN == "" || item.ACD() >= 1 {
 				continue
 			}
 			items = append(items, item)
@@ -303,7 +311,7 @@ func UpdateFile(ctx context.Context, filename string, opts AnalysisOptions) erro
 
 	for i := 0; i < len(filtered); i++ {
 		item := filtered[i]
-		evals, err := a.AnalyzePosition(ctx, item.FEN)
+		evals, err := a.AnalyzePosition(ctx, analysisOpts, item.FEN)
 		if err != nil {
 			return err
 		}
@@ -387,4 +395,8 @@ func fenToKey(fenKey string) string {
 		return fenKey
 	}
 	return strings.Join(parts[:4], " ")
+}
+
+func logInfo(msg string) {
+	_, _ = fmt.Fprintf(os.Stderr, "%s\n", strings.TrimRight(msg, "\n"))
 }

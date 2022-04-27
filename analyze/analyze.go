@@ -33,20 +33,12 @@ const multiPV = 8
 const stockfishBinary = "/home/jud/projects/trollfish/stockfish/stockfish"
 const stockfishDir = "/home/jud/projects/trollfish/stockfish"
 
-type BestMoveCheck struct {
+type AnalysisOptions struct {
 	MinDepth   int
 	MaxDepth   int
 	MinTime    time.Duration
 	MaxTime    time.Duration
 	DepthDelta int
-}
-
-var DefaultBestMoveCheck = BestMoveCheck{
-	MinDepth:   32,
-	MaxDepth:   63,
-	MinTime:    10 * time.Second,
-	MaxTime:    300 * time.Second,
-	DepthDelta: 5,
 }
 
 // const Engine_Stockfish_15_NN_6e0680e = 1
@@ -292,7 +284,7 @@ func maxDepthEvals(evals []Eval) []Eval {
 	return maxDepthEvals
 }
 
-func (a *Analyzer) getLines(ctx context.Context, check BestMoveCheck, fenPos string) []Eval {
+func (a *Analyzer) getLines(ctx context.Context, opts AnalysisOptions, fenPos string) []Eval {
 	start := time.Now()
 
 	var moves []Eval
@@ -302,11 +294,11 @@ func (a *Analyzer) getLines(ctx context.Context, check BestMoveCheck, fenPos str
 	var printEngineOutput bool
 
 	showEngineOutputAfter := 20 * time.Second
-	floorDepth := check.MinDepth - check.DepthDelta + 1
+	floorDepth := opts.MinDepth - opts.DepthDelta + 1
 	ignoreDepthsGreaterThan := 255
 
-	minTimeMS := int(check.MinTime.Milliseconds())
-	timeout := time.NewTimer(check.MaxTime)
+	minTimeMS := int(opts.MinTime.Milliseconds())
+	timeout := time.NewTimer(opts.MaxTime)
 loop:
 	for {
 		select {
@@ -371,7 +363,7 @@ loop:
 					return moves[i].Time > moves[j].Time
 				})
 
-				if eval.Depth >= check.MinDepth && len(moves) > 0 {
+				if eval.Depth >= opts.MinDepth && len(moves) > 0 {
 					delta := 1
 					move := moves[0].UCIMove
 					for i := 1; i < len(moves); i++ {
@@ -390,13 +382,13 @@ loop:
 						globalMate := eval.POVMate(board.ActiveColor)
 						san := board.UCItoSAN(eval.UCIMove)
 
-						t := fmt.Sprintf("t=%5v/%v", time.Since(start).Round(time.Second), check.MaxTime)
-						if delta >= check.DepthDelta {
-							logInfo(fmt.Sprintf("%s delta %d >= %d @ depth %d. move: %7s %s cp: %d mate: %d", t, delta, check.DepthDelta, eval.Depth, san, eval.UCIMove, globalCP, globalMate))
+						t := fmt.Sprintf("t=%5v/%v", time.Since(start).Round(time.Second), opts.MaxTime)
+						if delta >= opts.DepthDelta {
+							logInfo(fmt.Sprintf("%s delta %d >= %d @ depth %d. move: %7s %s cp: %d mate: %d", t, delta, opts.DepthDelta, eval.Depth, san, eval.UCIMove, globalCP, globalMate))
 							ignoreDepthsGreaterThan = eval.Depth
 							a.input <- "stop"
 						} else {
-							logInfo(fmt.Sprintf("%s delta %d < %d  @ depth %d. move: %7s %s cp: %d mate: %d", t, delta, check.DepthDelta, eval.Depth, san, eval.UCIMove, globalCP, globalMate))
+							logInfo(fmt.Sprintf("%s delta %d < %d  @ depth %d. move: %7s %s cp: %d mate: %d", t, delta, opts.DepthDelta, eval.Depth, san, eval.UCIMove, globalCP, globalMate))
 						}
 					}
 				}
@@ -406,7 +398,7 @@ loop:
 			if maxDepth == 0 {
 				return nil
 			}
-			logInfo(fmt.Sprintf("per-move timeout expired (%v), using what we have at depth %d", check.MaxTime, maxDepth))
+			logInfo(fmt.Sprintf("per-move timeout expired (%v), using what we have at depth %d", opts.MaxTime, maxDepth))
 			a.input <- "stop"
 			stopped = true
 		}
@@ -456,15 +448,15 @@ loop:
 	}
 
 	cur := prev
-	if cur.DepthDelta < check.DepthDelta {
+	if cur.DepthDelta < opts.DepthDelta {
 		for i := 1; i < len(moves); i++ {
 			move := moves[i]
-			if move.Depth < check.MinDepth {
+			if move.Depth < opts.MinDepth {
 				break
 			}
 			if move.DepthDelta > cur.DepthDelta {
 				cur = move
-				if cur.DepthDelta >= check.DepthDelta {
+				if cur.DepthDelta >= opts.DepthDelta {
 					moves = moves[i:]
 				}
 			}
@@ -488,7 +480,7 @@ type Analyzer struct {
 	stockfishStarted int64
 }
 
-func (a *Analyzer) AnalyzeGame(ctx context.Context, moves []string) error {
+func (a *Analyzer) AnalyzeGame(ctx context.Context, opts AnalysisOptions, moves []string) error {
 	logInfo(fmt.Sprintf("start game analysis, %d moves (%d plies)", (len(moves)+1)/2, len(moves)))
 
 	// lowercase all moves
@@ -545,7 +537,7 @@ gameMovesLoop:
 		}
 
 		// playerMoveUCI will come back
-		evals, err := a.AnalyzePosition(ctx, board.FEN())
+		evals, err := a.AnalyzePosition(ctx, opts, board.FEN())
 		if err != nil {
 			return err
 		}
@@ -620,7 +612,7 @@ gameMovesLoop:
 	return nil
 }
 
-func (a *Analyzer) AnalyzePosition(ctx context.Context, fenPos string) ([]Eval, error) {
+func (a *Analyzer) AnalyzePosition(ctx context.Context, opts AnalysisOptions, fenPos string) ([]Eval, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -635,10 +627,9 @@ func (a *Analyzer) AnalyzePosition(ctx context.Context, fenPos string) ([]Eval, 
 	var searchMoves []string
 	var evals Evals
 
-	check := DefaultBestMoveCheck
-	logInfo(fmt.Sprintf("start fen '%s' min_depth=%d", fenPos, check.MinDepth))
+	logInfo(fmt.Sprintf("start fen '%s' min_depth=%d", fenPos, opts.MinDepth))
 
-	evals, err = a.analyzePosition(ctx, fenPos, check)
+	evals, err = a.analyzePosition(ctx, opts, fenPos)
 	if err != nil {
 		return nil, fmt.Errorf("searchmoves '%v': %v", searchMoves, err)
 	}
@@ -663,7 +654,7 @@ func (a *Analyzer) waitReady() {
 	}
 }
 
-func (a *Analyzer) analyzePosition(ctx context.Context, fenPos string, check BestMoveCheck) ([]Eval, error) {
+func (a *Analyzer) analyzePosition(ctx context.Context, opts AnalysisOptions, fenPos string) ([]Eval, error) {
 	board := fen.FENtoBoard(fenPos)
 
 	if board.IsMate() {
@@ -671,9 +662,9 @@ func (a *Analyzer) analyzePosition(ctx context.Context, fenPos string, check Bes
 	}
 
 	a.input <- fmt.Sprintf("setoption name MultiPV value 1")
-	a.input <- fmt.Sprintf("go depth %d movetime %d", check.MaxDepth, check.MaxTime.Milliseconds())
+	a.input <- fmt.Sprintf("go depth %d movetime %d", opts.MaxDepth, opts.MaxTime.Milliseconds())
 
-	evals := a.getLines(ctx, check, fenPos)
+	evals := a.getLines(ctx, opts, fenPos)
 	if len(evals) == 0 {
 		return nil, fmt.Errorf("no evaluations returned for fen '%s'", fenPos)
 	}
