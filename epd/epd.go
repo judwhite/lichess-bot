@@ -318,7 +318,7 @@ func Dedupe(filename string) error {
 				// fen has 1 duplicate to check against
 
 				// remove whole-line matches
-				if line.String() == file.Lines[prevIdx].String() {
+				if strings.HasPrefix(file.Lines[prevIdx].String(), line.String()) {
 					file.Lines = append(file.Lines[:i], file.Lines[i+1:]...)
 					i--
 					removed++
@@ -336,7 +336,7 @@ func Dedupe(filename string) error {
 					prevIdx := prevDupes[j]
 
 					// remove whole-line matches
-					if line.String() == file.Lines[prevIdx].String() {
+					if strings.HasPrefix(file.Lines[prevIdx].String(), line.String()) {
 						file.Lines = append(file.Lines[:i], file.Lines[i+1:]...)
 						i--
 						removed++
@@ -354,7 +354,7 @@ func Dedupe(filename string) error {
 	}
 
 	if removed > 0 {
-		fmt.Printf("removed %d exact duplicate(s)\n", removed)
+		fmt.Printf("removed %d exact/prefix duplicate(s)\n", removed)
 		if err := file.Save(filename, true); err != nil {
 			return err
 		}
