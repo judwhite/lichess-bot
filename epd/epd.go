@@ -6,6 +6,7 @@ import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -353,11 +354,77 @@ func Dedupe(filename string) error {
 		}
 	}
 
+	// check for dupes where only one has a best move
+	for key, indexes := range dupes {
+		bestMoveIndex := -1
+		weightIndex := -1
+		anyBestMove, anyWeight := false, false
+		for _, i := range indexes {
+			if file.Lines[i].BestMove() != "" {
+				anyBestMove = true
+				if bestMoveIndex != -1 {
+					bestMoveIndex = -1
+					weightIndex = -1
+					break
+				}
+				bestMoveIndex = i
+			}
+
+			if file.Lines[i].GetInt("weight") != 0 {
+				anyWeight = true
+				if weightIndex != -1 {
+					bestMoveIndex = -1
+					weightIndex = -1
+					break
+				}
+				weightIndex = i
+			}
+		}
+
+		if !anyBestMove && !anyWeight {
+			bestMoveIndex = indexes[0]
+		}
+
+		if bestMoveIndex == -1 && weightIndex != -1 {
+			bestMoveIndex = weightIndex
+		}
+
+		if bestMoveIndex != -1 {
+			sort.Ints(indexes)
+			for j := len(indexes) - 1; j >= 0; j-- {
+				i := indexes[j]
+				if file.Lines[i].FEN != key {
+					panic(fmt.Errorf("key '%s' != line '%s' i: %d", key, file.Lines[i].FEN, i))
+				}
+				if i == bestMoveIndex {
+					fmt.Printf("keep:   %s\n", file.Lines[i])
+					continue
+				}
+				fmt.Printf("remove: %s\n", file.Lines[i])
+				file.Lines = append(file.Lines[:i], file.Lines[i+1:]...)
+				removed++
+
+				// renumber all indexes greater than or equal to 'i'
+				for _, indexes2 := range dupes {
+					for i2 := 0; i2 < len(indexes2); i2++ {
+						idx := indexes2[i2]
+						if idx < i {
+							continue
+						}
+						indexes2[i2]--
+					}
+				}
+			}
+			fmt.Println()
+		}
+	}
+
 	if removed > 0 {
 		fmt.Printf("removed %d exact/prefix duplicate(s)\n", removed)
 		if err := file.Save(filename, true); err != nil {
 			return err
 		}
+		return nil
 	}
 
 	if len(dupes) == 0 {
@@ -371,6 +438,7 @@ func Dedupe(filename string) error {
 		for _, idx := range indexes {
 			fmt.Println(file.Lines[idx].String())
 		}
+		fmt.Println()
 	}
 
 	return nil
