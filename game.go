@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"math/rand"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -39,6 +40,13 @@ type Game struct {
 	totalPonders    int
 	humanEval       string
 	lastStateEvent  time.Time
+
+	moves []SavedMove
+}
+
+type SavedMove struct {
+	FEN     string
+	MoveSAN string
 }
 
 func NewGame(gameID string, input chan<- string, output <-chan string, book *polyglot.Book) *Game {
@@ -82,21 +90,49 @@ func (g *Game) StreamGameEvents() {
 
 func (g *Game) Finish() {
 	g.Lock()
+	defer g.Unlock()
+
+	if g.finished {
+		return
+	}
 	g.finished = true
-	g.input <- "stop"
-	if g.pondering {
-		g.pondering = false
-		g.ponder = ""
-		// consume 'bestmove' from pondering, so we don't accidentally consume it later
-		for line := range g.output {
-			if strings.HasPrefix(line, "bestmove") {
-				break
+	g.stopPondering()
+
+	fp, err := os.OpenFile("recent.epd", os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer func() {
+		_ = fp.Sync()
+		_ = fp.Close()
+	}()
+
+	var sb strings.Builder
+	for i, move := range g.moves {
+		b := fen.FENtoBoard(move.FEN)
+
+		_, found := g.book.Get(move.FEN)
+		if !found && b.FullMove <= 20 {
+			ourMove := i%2 == g.playerNumber
+			_, err = fmt.Fprintf(fp, "%s sm %s; pl %s;\n", fen.Key(move.FEN), move.MoveSAN, iif(ourMove, "us", "them"))
+			if err != nil {
+				log.Fatal(err)
 			}
 		}
+
+		if b.ActiveColor == fen.WhitePieces {
+			sb.WriteByte('\n')
+			sb.WriteString(fmt.Sprintf("%3d. %7s", b.FullMove, move.MoveSAN))
+		} else {
+			sb.WriteString(fmt.Sprintf("  %7s", move.MoveSAN))
+		}
 	}
-	fmt.Printf("%d book move(s) played\n", g.bookMovesPlayed)
-	fmt.Printf("%d/%d predictions played\n", g.ponderHits, g.totalPonders)
-	g.Unlock()
+	sb.WriteByte('\n')
+
+	sb.WriteString(fmt.Sprintf("%d book move(s) played\n", g.bookMovesPlayed))
+	sb.WriteString(fmt.Sprintf("%d/%d predictions played\n", g.ponderHits, g.totalPonders))
+
+	fmt.Print(sb.String())
 }
 
 func (g *Game) handleChat(ndjson []byte) {
@@ -112,8 +148,8 @@ func (g *Game) handleChat(ndjson []byte) {
 		return
 	}
 
-	msg := fmt.Sprintf("@%s No talking.", g.opponent.Name)
-	if chat.Room == "player" {
+	//msg := fmt.Sprintf("@%s No talking.", g.opponent.Name)
+	/*if chat.Room == "player" {
 		if !g.chatPlayerRoomNoTalking {
 			g.chatPlayerRoomNoTalking = true
 			go func() {
@@ -133,7 +169,7 @@ func (g *Game) handleChat(ndjson []byte) {
 				}
 			}()
 		}
-	}
+	}*/
 }
 
 func (g *Game) handleGameFull(ndjson []byte) {
@@ -203,6 +239,7 @@ func (g *Game) handleGameState(ndjson []byte) {
 	if err := json.Unmarshal(ndjson, &state); err != nil {
 		log.Fatal(err)
 	}
+	state.MessageReceived = time.Now()
 
 	if state.Winner != "" {
 		var color string
@@ -262,6 +299,8 @@ func (g *Game) playMove(ndjson []byte, state api.State) {
 		board.Moves(moves[:len(moves)-1]...)
 		playedSAN := board.UCItoSAN(opponentMoveUCI)
 
+		g.storeMove(board.FEN(), playedSAN)
+
 		if g.ponder != "" && g.pondering {
 			predictedSAN := board.UCItoSAN(g.ponder)
 			fmt.Printf("%s played: %s predicted: %s\n", ts(), playedSAN, predictedSAN)
@@ -274,42 +313,49 @@ func (g *Game) playMove(ndjson []byte, state api.State) {
 			fmt.Printf("%s played: %s\n", ts(), playedSAN)
 		}
 		board.Moves(opponentMoveUCI)
-	} else {
+	} else if len(moves) > 0 {
+		opponentMoveUCI := moves[len(moves)-1]
+		playedSAN := board.UCItoSAN(opponentMoveUCI)
+		g.storeMove(board.FEN(), playedSAN)
+
 		board.Moves(moves...)
+
+		fmt.Printf("%s played: %s\n", ts(), playedSAN)
 	}
 
 	var bestMove string
 
 	// check book
-	bookMoves, ok := g.book.Get(board.FEN())
+	bookMoves, bookMoveFound := g.book.Get(board.FEN())
 
-	if ok {
+	if bookMoveFound {
 		n := rand.Intn(len(bookMoves)) // TODO: use freq field
 		bookMove := bookMoves[n]
 		bestMove = bookMove.UCIMove
 		g.humanEval = iif(bookMove.Mate == 0, fmt.Sprintf("%0.2f", float64(bookMove.CP)/100), fmt.Sprintf("M%d", bookMove.Mate))
 
 		fmt.Printf("!!! ^^^ !!! ^^^ %s (%s) %s came from book, eval %s\n", board.FEN(), board.UCItoSAN(bestMove), bestMove, g.humanEval)
+		g.bookMovesPlayed++
+
+		if ponderHit {
+			g.ponderHit()
+			g.consumeBestMove()
+		} else {
+			g.stopPondering()
+		}
+
 		if bookMove.UCIPonder != "" {
+			g.ponderMove(bookMove.UCIPonder, state, bestMove)
+
 			ponderSAN := board.UCItoSAN(bookMove.UCIPonder)
 			fmt.Printf("ponder: %s (%s)\n", ponderSAN, bookMove.UCIPonder)
 		}
-		g.bookMovesPlayed++
 	} else {
 		if ponderHit {
-			g.input <- "ponderhit"
-			g.pondering = false
+			g.ponderHit()
 		} else {
-			g.input <- "stop"
-			if g.pondering {
-				g.pondering = false
-				// consume 'bestmove' from pondering, so we don't accidentally consume it later
-				for line := range g.output {
-					if strings.HasPrefix(line, "bestmove") {
-						break
-					}
-				}
-			}
+			g.stopPondering()
+
 			var pos string
 			if state.Moves == "" {
 				pos = fmt.Sprintf("position fen %s", startPosFEN)
@@ -365,6 +411,34 @@ func (g *Game) playMove(ndjson []byte, state api.State) {
 	bestMoveSAN := board.UCItoSAN(bestMove)
 	fmt.Printf("%s game: %s (%d) our_time: %6v opp_time: %6v move: %s eval: %s\n",
 		ts(), g.opponent.Name, g.opponent.Rating, ourTime, opponentTime, bestMoveSAN, g.humanEval)
+
+	g.storeMove(board.FEN(), bestMoveSAN)
+}
+
+func (g *Game) storeMove(fenPOS, moveSAN string) {
+	g.moves = append(g.moves, SavedMove{FEN: fenPOS, MoveSAN: moveSAN})
+}
+
+func (g *Game) ponderHit() {
+	g.input <- "ponderhit"
+	g.pondering = false
+}
+
+func (g *Game) stopPondering() {
+	g.input <- "stop"
+	if g.pondering {
+		g.pondering = false
+		g.consumeBestMove()
+	}
+}
+
+func (g *Game) consumeBestMove() {
+	// consume 'bestmove' from pondering, so we don't accidentally consume it later
+	for line := range g.output {
+		if strings.HasPrefix(line, "bestmove") {
+			break
+		}
+	}
 }
 
 func (g *Game) ponderMove(ponderMoveUCI string, state api.State, playedMoveUCI string) {
@@ -379,18 +453,16 @@ func (g *Game) ponderMove(ponderMoveUCI string, state api.State, playedMoveUCI s
 	}
 
 	var goCmd string
-	elapsed := int(time.Since(g.lastStateEvent).Milliseconds()) - 100
-	if g.playerNumber == 0 {
-		goCmd = fmt.Sprintf("go ponder wtime %d winc %d btime %d binc %d",
-			state.WhiteTime-elapsed, state.WhiteInc,
-			state.BlackTime, state.BlackInc,
-		)
-	} else {
-		goCmd = fmt.Sprintf("go ponder wtime %d winc %d btime %d binc %d",
-			state.WhiteTime, state.WhiteInc,
-			state.BlackTime-elapsed, state.BlackInc,
-		)
-	}
+	elapsed := int(time.Since(state.MessageReceived).Milliseconds()) + 100
+	whiteTime := state.WhiteTime - iif(g.playerNumber == 0, elapsed, 0)
+	whiteTime = max(whiteTime, 50)
+	blackTime := state.BlackTime - iif(g.playerNumber == 0, 0, elapsed)
+	blackTime = max(blackTime, 50)
+
+	goCmd = fmt.Sprintf("go ponder wtime %d winc %d btime %d binc %d",
+		whiteTime, state.WhiteInc,
+		blackTime, state.BlackInc,
+	)
 
 	g.input <- pos
 	g.input <- goCmd
@@ -439,4 +511,8 @@ func iif[T any](condition bool, ifTrue, ifFalse T) T {
 		return ifTrue
 	}
 	return ifFalse
+}
+
+func max(a, b int) int {
+	return iif(a > b, a, b)
 }

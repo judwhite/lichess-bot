@@ -22,7 +22,7 @@ import (
 const botID = "trollololfish"
 const startPosFEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
 const maxRating = 4000
-const minRating = 2100
+const minRating = 2200
 
 type Listener struct {
 	ctx context.Context

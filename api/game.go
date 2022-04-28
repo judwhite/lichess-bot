@@ -1,5 +1,7 @@
 package api
 
+import "time"
+
 type GameEvent struct {
 	Type string        `json:"type"`
 	Game GameEventInfo `json:"game"`
@@ -85,6 +87,8 @@ type State struct {
 	Winner    string `json:"winner"`
 	WhiteDraw bool   `json:"wdraw"`
 	BlackDraw bool   `json:"bdraw"`
+
+	MessageReceived time.Time `json:"-"`
 }
 
 type CompletedGame struct {
