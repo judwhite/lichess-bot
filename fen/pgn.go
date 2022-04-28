@@ -3,6 +3,7 @@ package fen
 import (
 	"bufio"
 	"fmt"
+	"log"
 	"os"
 	"sort"
 	"strconv"
@@ -12,11 +13,13 @@ import (
 
 type Database struct {
 	Games []*Game
+
+	Positions map[string][]PGNMove
 }
 
 type Game struct {
-	FEN   string
-	Moves []LegalMove
+	Tags  Tags
+	Moves []PGNMove
 
 	Positions map[string][]Move
 }
@@ -31,7 +34,7 @@ func (g *Game) populatePositions() {
 		return
 	}
 
-	b := FENtoBoard(g.FEN)
+	b := FENtoBoard(g.Tags["FEN"])
 	pos := make(map[string][]Move, len(g.Moves))
 
 	b.Moves(g.Moves[0].UCI)
@@ -86,7 +89,7 @@ func (db *Database) MostFrequentMove(fen string) string {
 }
 
 func LoadPGNDatabase(filename string) (Database, error) {
-	var db Database
+	db := Database{Positions: make(map[string][]PGNMove)}
 
 	fp, err := os.Open(filename)
 	if err != nil {
@@ -113,14 +116,14 @@ func LoadPGNDatabase(filename string) (Database, error) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			startFEN, moves, err := PGNtoMoves(s)
+			tags, moves, err := ParsePGN(s)
 			if err != nil {
 				fmt.Printf("PGN:\n\n%s\n\n\n", s)
 				panic(err)
 			}
 
 			if len(moves) != 0 {
-				game := &Game{FEN: startFEN, Moves: moves}
+				game := &Game{Tags: tags, Moves: moves}
 				game.populatePositions()
 				mtx.Lock()
 				db.Games = append(db.Games, game)
@@ -165,9 +168,12 @@ func LoadPGNDatabase(filename string) (Database, error) {
 	return db, nil
 }
 
-func PGNTags(pgn string) map[string]string {
-	m := make(map[string]string)
-	lines := strings.Split(pgn, "\n")
+type Tags map[string]string
+
+func PGNTags(pgn string) (Tags, string) {
+	m := make(Tags)
+	lines := strings.Split(strings.TrimSpace(pgn), "\n")
+	var sb strings.Builder
 	for _, line := range lines {
 		if strings.HasPrefix(line, "[") {
 			line = strings.Trim(line, "[]")
@@ -178,34 +184,34 @@ func PGNTags(pgn string) map[string]string {
 			key := line[:idx]
 			value := line[idx+2 : len(line)-1]
 			m[key] = value
+		} else if line != "" {
+			sb.WriteString(line)
+			sb.WriteByte('\n')
 		}
 	}
 
-	return m
+	return m, sb.String()
 }
 
-func PGNtoMoves(pgn string) (string, []LegalMove, error) {
+type PGNMove struct {
+	FENKey string
+	UCI    string
+}
+
+func ParsePGN(pgn string) (Tags, []PGNMove, error) {
+	var tags Tags
+	tags, pgn = PGNTags(pgn)
+
 	pgn = strings.TrimSpace(pgn)
 	if len(pgn) == 0 {
-		return "", nil, nil
+		return nil, nil, nil
 	}
 
-	var moves []LegalMove
+	var moves []PGNMove
 
-	startFEN := startPosFEN
+	startFEN := tags["FEN"]
+
 	lines := strings.Split(pgn, "\n")
-	for i := 0; i < len(lines); i++ {
-		line := strings.TrimSpace(lines[i])
-		if strings.HasPrefix(line, "[FEN \"") {
-			startFEN = strings.TrimSuffix(strings.TrimPrefix(line, "[FEN \""), "\"]")
-		}
-		if len(line) > 0 && !strings.HasPrefix(line, "[") {
-			// start of move data
-			lines = lines[i:]
-			break
-		}
-	}
-
 	pgn = strings.TrimSpace(strings.Join(lines, " "))
 	parts := strings.Split(pgn, " ")
 	b := FENtoBoard(startFEN)
@@ -220,7 +226,7 @@ func PGNtoMoves(pgn string) (string, []LegalMove, error) {
 			moveNum := strings.TrimRight(part, ".")
 			n, err := strconv.Atoi(moveNum)
 			if err != nil {
-				return startFEN, nil, fmt.Errorf("%v: '%s'", err, moveNum)
+				return tags, nil, fmt.Errorf("%v: '%s'", err, moveNum)
 			}
 			fullMove = n
 			continue
@@ -247,31 +253,24 @@ func PGNtoMoves(pgn string) (string, []LegalMove, error) {
 			piece = lower(piece)
 		}
 
-		legalMoves := b.PieceLegalMoves(piece)
-		var move LegalMove
-		var uci string
-		var lastUCItoSAN string
-		for _, legalMove := range legalMoves {
-			if legalMove.Piece == piece {
-				lastUCItoSAN = b.UCItoSAN(legalMove.UCI)
-				if lastUCItoSAN == san {
-					uci = legalMove.UCI
-					move = legalMove
-					break
-				}
-			}
+		uci, err := b.SANtoUCI(san)
+		if err != nil {
+			log.Fatal(err)
 		}
+		move := PGNMove{FENKey: b.FENKey(), UCI: uci}
+
 		if san == "" {
-			return startFEN, nil, fmt.Errorf("FEN: '%s' full_move: %d color: '%s' want: '%s' got: <empty>", b.FEN(), fullMove, b.ActiveColor, part)
+			return tags, nil, fmt.Errorf("FEN: '%s' full_move: %d color: '%s' want: '%s' got: <empty>", b.FEN(), fullMove, b.ActiveColor, part)
 		}
 		if san != part {
-			return startFEN, nil, fmt.Errorf("FEN: '%s' full_move: %d color: '%s' want: '%s' got: '%s'", b.FEN(), fullMove, b.ActiveColor, part, san)
+			return tags, nil, fmt.Errorf("FEN: '%s' full_move: %d color: '%s' want: '%s' got: '%s'", b.FEN(), fullMove, b.ActiveColor, part, san)
 		}
 		if uci == "" {
-			return startFEN, nil, fmt.Errorf("FEN: '%s' full_move: %d color: '%s' piece: '%c' san: '%s' uci: <empty> move: %v legalMoves: %v last_san_check: %s", b.FEN(), fullMove, b.ActiveColor, piece, part, move, legalMoves, lastUCItoSAN)
+			return tags, nil, fmt.Errorf("FEN: '%s' full_move: %d color: '%s' piece: '%c' san: '%s' uci: <empty> move: %v", b.FEN(), fullMove, b.ActiveColor, piece, part, move)
 		}
+
 		moves = append(moves, move)
 		b.Moves(uci)
 	}
-	return startFEN, moves, nil
+	return tags, moves, nil
 }
