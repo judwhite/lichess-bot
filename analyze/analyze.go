@@ -447,7 +447,9 @@ gameMovesLoop:
 		board.Moves(beforeMoves...)
 		sanMove := board.UCItoSAN(playerMoveUCI)
 
-		if board.Clone().Moves(playerMoveUCI).IsMate() {
+		newBoard := board
+		newBoard.Moves(playerMoveUCI)
+		if newBoard.IsMate() {
 			// TODO: stalemate
 			movesEval = append(movesEval, Move{
 				Ply:      i,
@@ -461,7 +463,7 @@ gameMovesLoop:
 		}
 
 		if len(movesEval) > 0 {
-			startFEN := board.Clone().Moves(playerMoveUCI).FEN()
+			startFEN := newBoard.FEN()
 
 			pgn := evalToPGN(startFEN, 0, movesEval, false)
 			logMultiline(pgn)
@@ -817,8 +819,8 @@ func evalToPGN(startFEN string, depth int, movesEval Moves, header bool) string 
 
 		if showVariations {
 			//fmt.Printf("board.FullMove: %s\n", board.FullMove)
-			writeVariation(&sb, board.Clone(), bestMove, "")
-			writeVariation(&sb, board.Clone(), playedMove, annotation)
+			writeVariation(&sb, board, bestMove, "")
+			writeVariation(&sb, board, playedMove, annotation)
 		}
 		board.Moves(move.UCI)
 
@@ -831,7 +833,7 @@ func evalToPGN(startFEN string, depth int, movesEval Moves, header bool) string 
 	return sb.String()
 }
 
-func writeVariation(sb *strings.Builder, board *fen.Board, eval Eval, annotation string) {
+func writeVariation(sb *strings.Builder, board fen.Board, eval Eval, annotation string) {
 	sb.WriteString("    ( ")
 
 	used := 6

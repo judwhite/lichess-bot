@@ -515,10 +515,10 @@ func UpdateFile(ctx context.Context, filename string, opts AnalysisOptions) erro
 		item.SetInt(OpCodeAnalysisCountSeconds, bestMove.Time/1000)
 
 		if bestMove.Mate == 0 {
-			item.SetInt(OpCodeCentipawnEvaluation, bestMove.POVCP(board.ActiveColor))
+			item.SetInt(OpCodeCentipawnEvaluation, bestMove.GlobalCP(board.ActiveColor))
 			item.Remove(OpCodeDirectMate)
 		} else {
-			item.SetInt(OpCodeDirectMate, bestMove.POVMate(board.ActiveColor))
+			item.SetInt(OpCodeDirectMate, bestMove.GlobalMate(board.ActiveColor))
 			item.Remove(OpCodeCentipawnEvaluation)
 		}
 

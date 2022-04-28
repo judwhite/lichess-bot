@@ -20,7 +20,6 @@ type Board struct {
 
 	whiteKingIndex int
 	blackKingIndex int
-	initialized    bool
 }
 
 type Color int
@@ -96,9 +95,7 @@ var (
 	pawnPaths = []int{-1, 1}
 )
 
-func (b *Board) String() string {
-	b.init()
-
+func (b Board) String() string {
 	var sb strings.Builder
 	for i := 0; i < 8; i++ {
 		sb.Write(b.Pos[i*8 : (i*8)+8])
@@ -107,9 +104,7 @@ func (b *Board) String() string {
 	return sb.String()
 }
 
-func (b *Board) FENKey() string {
-	b.init()
-
+func (b Board) FENKey() string {
 	var fen strings.Builder
 	for i := 0; i < 8; i++ {
 		if i != 0 {
@@ -186,9 +181,7 @@ func (b *Board) FENKey() string {
 	return fen.String()
 }
 
-func (b *Board) FEN() string {
-	b.init()
-
+func (b Board) FEN() string {
 	return fmt.Sprintf("%s %d %d", b.FENKey(), b.HalfmoveClock, b.FullMove)
 }
 
@@ -197,8 +190,10 @@ func Key(fen string) string {
 	return b.FENKey()
 }
 
-func (b *Board) UCItoSAN(move string) string {
-	b.init()
+func (b Board) UCItoSAN(move string) string {
+	if b.Pos[0] == 0 {
+		b.LoadFEN(startPosFEN)
+	}
 
 	fromUCI := move[:2]
 	toUCI := move[2:4]
@@ -302,11 +297,11 @@ func (b *Board) UCItoSAN(move string) string {
 		}
 	}
 
-	newBoard := b.Clone()
-	newBoard.Moves(move)
+	// NOTE: only okay because this isn't a pointer
+	b.Moves(move)
 
-	if newBoard.IsCheck() {
-		if newBoard.IsMate() {
+	if b.IsCheck() {
+		if b.IsMate() {
 			san.WriteByte('#')
 		} else {
 			san.WriteByte('+')
@@ -316,8 +311,10 @@ func (b *Board) UCItoSAN(move string) string {
 	return san.String()
 }
 
-func (b *Board) SANtoUCI(san string) (string, error) {
-	b.init()
+func (b Board) SANtoUCI(san string) (string, error) {
+	if b.Pos[0] == 0 {
+		b.LoadFEN(startPosFEN)
+	}
 
 	if len(san) < 2 {
 		return "", fmt.Errorf("'%s' is not a valid move in '%s'", san, b.FEN())
@@ -351,17 +348,18 @@ func (b *Board) SANtoUCI(san string) (string, error) {
 	return "", fmt.Errorf("'%s' is not a valid move in '%s'", san, b.FEN())
 }
 
-func (b *Board) checkMoveNotCheck(from, to int) bool {
+func (b Board) checkMoveNotCheck(from, to int) bool {
 	uci := indexesToUCI(from, to)
 	activeColor := b.ActiveColor
-	newBoard := b.Clone()
-	newBoard.Moves(uci)
-	newBoard.ActiveColor = activeColor
-	return !newBoard.IsCheck()
+	b.Moves(uci)
+	b.ActiveColor = activeColor
+	return !b.IsCheck()
 }
 
 func (b *Board) Moves(moves ...string) *Board {
-	b.init()
+	if b.Pos[0] == 0 {
+		b.LoadFEN(startPosFEN)
+	}
 
 	if len(moves) == 0 {
 		return b
@@ -506,16 +504,10 @@ func (b *Board) Moves(moves ...string) *Board {
 	return b
 }
 
-func FENtoBoard(fen string) *Board {
+func FENtoBoard(fen string) Board {
 	var b Board
 	b.LoadFEN(fen)
-	return &b
-}
-
-func (b *Board) init() {
-	if !b.initialized {
-		b.LoadFEN(startPosFEN)
-	}
+	return b
 }
 
 func (b *Board) LoadFEN(fen string) {
@@ -568,7 +560,6 @@ func (b *Board) LoadFEN(fen string) {
 	b.EnPassantSquare = epSquare
 	b.HalfmoveClock = atoi(parts[4])
 	b.FullMove = atoi(parts[5])
-	b.initialized = true
 
 	for i := 7; i >= 0; i-- {
 		rank := []byte(ranks[i])
@@ -608,9 +599,7 @@ func atoi(s string) int {
 	return n
 }
 
-func (b *Board) IsCheck() bool {
-	b.init()
-
+func (b Board) IsCheck() bool {
 	var (
 		enemyQueen  byte
 		enemyRook   byte
@@ -731,9 +720,7 @@ func (b *Board) IsCheck() bool {
 	return false
 }
 
-func (b *Board) IsMate() bool {
-	b.init()
-
+func (b Board) IsMate() bool {
 	if !b.IsCheck() {
 		return false
 	}
@@ -762,22 +749,6 @@ func indexToRankFile(index int) (int, int) {
 	return rank, file
 }
 
-func (b *Board) Clone() *Board {
-	b.init()
-
-	return &Board{
-		Pos:             b.Pos,
-		ActiveColor:     b.ActiveColor,
-		Castling:        b.Castling,
-		EnPassantSquare: b.EnPassantSquare,
-		HalfmoveClock:   b.HalfmoveClock,
-		FullMove:        b.FullMove,
-		whiteKingIndex:  b.whiteKingIndex,
-		blackKingIndex:  b.blackKingIndex,
-		initialized:     b.initialized,
-	}
-}
-
 type LegalMove struct {
 	Piece byte
 	From  string
@@ -794,8 +765,10 @@ type legalMove struct {
 	to   int
 }
 
-func (b *Board) PieceLegalMoves(piece byte) []LegalMove {
-	b.init()
+func (b Board) PieceLegalMoves(piece byte) []LegalMove {
+	if b.Pos[0] == 0 {
+		b.LoadFEN(startPosFEN)
+	}
 
 	moves := b.pieceLegalMoves(piece)
 	sanMoves := make([]LegalMove, 0, len(moves)+4)
@@ -816,7 +789,7 @@ func (b *Board) PieceLegalMoves(piece byte) []LegalMove {
 	return sanMoves
 }
 
-func (b *Board) pieceLegalMoves(piece byte) []legalMove {
+func (b Board) pieceLegalMoves(piece byte) []legalMove {
 	var king, queen, bishop, knight, rook, pawn byte
 	if b.ActiveColor == WhitePieces {
 		king, queen, bishop, knight, rook, pawn = 'K', 'Q', 'B', 'N', 'R', 'P'
@@ -857,9 +830,7 @@ func (b *Board) pieceLegalMoves(piece byte) []legalMove {
 	return moves
 }
 
-func (b *Board) AllLegalMoves() []LegalMove {
-	b.init()
-
+func (b Board) AllLegalMoves() []LegalMove {
 	return b.PieceLegalMoves(0)
 }
 
@@ -878,7 +849,7 @@ var (
 	fenCastlingMap   = [4]byte{'K', 'Q', 'k', 'q'}
 )
 
-func (b *Board) kingMoves(idx int) []int {
+func (b Board) kingMoves(idx int) []int {
 	moves := make([]int, 0, 8)
 
 	startRank, startFile := indexToRankFile(idx)
@@ -950,19 +921,19 @@ func (b *Board) kingMoves(idx int) []int {
 	return moves
 }
 
-func (b *Board) queenMoves(idx int) []int {
+func (b Board) queenMoves(idx int) []int {
 	return b.pathMoves(idx, kingPaths)
 }
 
-func (b *Board) bishopMoves(idx int) []int {
+func (b Board) bishopMoves(idx int) []int {
 	return b.pathMoves(idx, bishopPaths)
 }
 
-func (b *Board) rookMoves(idx int) []int {
+func (b Board) rookMoves(idx int) []int {
 	return b.pathMoves(idx, rookPaths)
 }
 
-func (b *Board) knightMoves(idx int) []int {
+func (b Board) knightMoves(idx int) []int {
 	var moves []int
 
 	startRank, startFile := indexToRankFile(idx)
@@ -994,7 +965,7 @@ func (b *Board) knightMoves(idx int) []int {
 	return moves
 }
 
-func (b *Board) pawnMoves(idx int) []int {
+func (b Board) pawnMoves(idx int) []int {
 	var moves []int
 
 	var direction, homeRank int
@@ -1059,7 +1030,7 @@ func (b *Board) pawnMoves(idx int) []int {
 	return moves
 }
 
-func (b *Board) pathMoves(idx int, paths []nav) []int {
+func (b Board) pathMoves(idx int, paths []nav) []int {
 	var moves []int
 
 	startRank, startFile := indexToRankFile(idx)

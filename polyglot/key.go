@@ -6,7 +6,7 @@ const castleKeyOffset = 768
 const enPassantKeyOffset = 772
 const turnKeyOffset = 780
 
-func Key(board *fen.Board) uint64 {
+func Key(board fen.Board) uint64 {
 	piece := pieceKey(board.Pos)
 	castle := castleKey(board.Castling)
 	ep := enPassantKey(board.Pos, board.EnPassantSquare)
