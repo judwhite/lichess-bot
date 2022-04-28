@@ -64,7 +64,12 @@ func New(ctx context.Context, input chan<- string, output <-chan string, onlyUse
 		log.Fatal(err)
 	}
 	if l.book != nil {
-		fmt.Printf("book loaded, %d positions\n", l.book.PosCount())
+		orig := l.book.PosCount()
+		fmt.Printf("book loaded, %d positions\n", orig)
+		if err := l.book.AddBook("book.bin"); err != nil {
+			log.Fatal(err)
+		}
+		fmt.Printf("book loaded, %d positions\n", l.book.PosCount()-orig)
 	}
 
 	if onlyUser == "" {

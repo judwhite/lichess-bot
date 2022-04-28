@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"io"
+	"log"
 	"os"
 
 	"trollfish-lichess/fen"
@@ -13,6 +14,14 @@ type Book struct {
 	book map[string][]*BookEntry
 
 	polyglotBook map[uint64][]*BookEntry
+}
+
+type BookEntry struct {
+	FEN     string `json:"fen"`
+	UCIMove string `json:"uci"`
+	Freq    uint16 `json:"freq"`
+
+	polyglotMove uint16
 }
 
 func NewBook() *Book {
@@ -39,9 +48,26 @@ func (b *Book) Get(fenKey string) ([]*BookEntry, bool) {
 		be, ok = b.polyglotBook[key]
 		if ok {
 			delete(b.polyglotBook, key)
+
+			fp, err := os.OpenFile("extract.epd", os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+			if err != nil {
+				log.Fatal(err)
+			}
+			defer func() {
+				_ = fp.Sync()
+				_ = fp.Close()
+			}()
+
 			for _, entry := range be {
 				uciMove := toUCIMove(board, entry.polyglotMove)
 				entry.UCIMove = uciMove
+
+				san := board.UCItoSAN(uciMove)
+
+				_, err := fmt.Fprintf(fp, "%s sm %s; weight %d;\n", fenKey, san, entry.Freq)
+				if err != nil {
+					log.Fatal(err)
+				}
 			}
 			b.book[fenKey] = be
 			return be, true
@@ -69,12 +95,15 @@ func (b *Book) PosCount() int {
 	return len(b.book) + len(b.polyglotBook)
 }
 
-type BookEntry struct {
-	FEN     string `json:"fen"`
-	UCIMove string `json:"uci"`
-	Freq    uint16 `json:"freq"`
+func (b *Book) AddBook(filename string) error {
+	b2, err := LoadBook(filename)
+	if err != nil {
+		return err
+	}
 
-	polyglotMove uint16
+	// TODO: clobbers and only sets the polyglot book
+	b.polyglotBook = b2.polyglotBook
+	return nil
 }
 
 func LoadBook(filename string) (*Book, error) {
