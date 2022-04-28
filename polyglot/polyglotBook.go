@@ -17,10 +17,11 @@ type Book struct {
 }
 
 type BookEntry struct {
-	UCIMove string
-	Weight  uint16
-	CP      int
-	Mate    int
+	UCIMove   string
+	UCIPonder string
+	Weight    uint16
+	CP        int
+	Mate      int
 
 	polyglotMove uint16
 }
@@ -70,15 +71,15 @@ func (b *Book) Get(fenKey string) ([]*BookEntry, bool) {
 					log.Fatal(err)
 				}
 			}
-			b.book[fenKey] = be
-			return be, true
+			//b.book[fenKey] = be
+			return nil, false
 		}
 	}
 
 	return nil, false
 }
 
-func (b *Book) Add(fenKey, sanMove string, cp, mate int) error {
+func (b *Book) Add(fenKey, sanMove string, cp, mate int, sanPonder string) error {
 	board := fen.FENtoBoard(fenKey)
 	fenKey = board.FENKey()
 
@@ -92,7 +93,16 @@ func (b *Book) Add(fenKey, sanMove string, cp, mate int) error {
 		mate *= -1
 	}
 
-	b.book[fenKey] = append(b.book[fenKey], &BookEntry{UCIMove: uci, CP: cp, Mate: mate})
+	var uciPonder string
+	if sanPonder != "" {
+		board.Moves(uci)
+		uciPonder, err = board.SANtoUCI(sanPonder)
+		if err != nil {
+			return err
+		}
+	}
+
+	b.book[fenKey] = append(b.book[fenKey], &BookEntry{UCIMove: uci, CP: cp, Mate: mate, UCIPonder: uciPonder})
 
 	return nil
 }

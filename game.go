@@ -287,8 +287,13 @@ func (g *Game) playMove(ndjson []byte, state api.State) {
 		n := rand.Intn(len(bookMoves)) // TODO: use freq field
 		bookMove := bookMoves[n]
 		bestMove = bookMove.UCIMove
+		g.humanEval = iif(bookMove.Mate == 0, fmt.Sprintf("%0.2f", float64(bookMove.CP)/100), fmt.Sprintf("M%d", bookMove.Mate))
 
-		fmt.Printf("!!! ^^^ !!! ^^^ %s %s %s came from book\n", board.FEN(), board.UCItoSAN(bestMove), bestMove)
+		fmt.Printf("!!! ^^^ !!! ^^^ %s (%s) %s came from book, eval %s\n", board.FEN(), board.UCItoSAN(bestMove), bestMove, g.humanEval)
+		if bookMove.UCIPonder != "" {
+			ponderSAN := board.UCItoSAN(bookMove.UCIPonder)
+			fmt.Printf("ponder: %s (%s)\n", ponderSAN, bookMove.UCIPonder)
+		}
 		g.bookMovesPlayed++
 	} else {
 		if ponderHit {
@@ -427,4 +432,11 @@ func (l *Listener) Playing() bool {
 		return false
 	}
 	return !l.activeGame.finished
+}
+
+func iif[T any](condition bool, ifTrue, ifFalse T) T {
+	if condition {
+		return ifTrue
+	}
+	return ifFalse
 }

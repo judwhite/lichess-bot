@@ -582,8 +582,9 @@ func LoadBook(filename string) (*polyglot.Book, error) {
 		if bestMoveSAN == "" {
 			continue
 		}
+		ponderSAN := item.GetString("pm")
 
-		if err := book.Add(item.FEN, bestMoveSAN, item.CE(), item.DM()); err != nil {
+		if err := book.Add(item.FEN, bestMoveSAN, item.CE(), item.DM(), ponderSAN); err != nil {
 			return nil, err
 		}
 	}
