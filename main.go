@@ -141,7 +141,7 @@ func main() {
 			for i := 0; i < len(game.Moves) && i < extractEPDPlies; i++ {
 				move := game.Moves[i].UCI
 				board.Moves(move)
-				fenKey := board.FENNoMoveClocks()
+				fenKey := board.FENKey()
 				if file.Contains(fenKey) {
 					//fmt.Printf("already have: %s\n", file.Find(fenKey))
 					continue

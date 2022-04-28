@@ -96,7 +96,7 @@ var (
 	pawnPaths = []int{-1, 1}
 )
 
-func (b *Board) FENNoMoveClocks() string {
+func (b *Board) FENKey() string {
 	b.init()
 
 	var fen strings.Builder
@@ -181,7 +181,12 @@ func (b *Board) FENNoMoveClocks() string {
 func (b *Board) FEN() string {
 	b.init()
 
-	return fmt.Sprintf("%s %d %d", b.FENNoMoveClocks(), b.HalfmoveClock, b.FullMove)
+	return fmt.Sprintf("%s %d %d", b.FENKey(), b.HalfmoveClock, b.FullMove)
+}
+
+func Key(fen string) string {
+	b := FENtoBoard(fen)
+	return b.FENKey()
 }
 
 func (b *Board) UCItoSAN(move string) string {

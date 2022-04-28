@@ -36,7 +36,7 @@ func (g *Game) populatePositions() {
 
 	b.Moves(g.Moves[0].UCI)
 	for i := 1; i < len(g.Moves); i++ {
-		key := b.FENNoMoveClocks()
+		key := b.FENKey()
 		uci := g.Moves[i].UCI
 
 		//fmt.Printf("fen: '%s' uci: %s i: %d\n", key, uci, i)

@@ -36,7 +36,7 @@ func (b *Book) Get(fenKey string) ([]*BookEntry, bool) {
 	}
 
 	board := fen.FENtoBoard(fenKey)
-	fenKey = board.FENNoMoveClocks()
+	fenKey = board.FENKey()
 
 	be, ok := b.book[fenKey]
 	if ok {
@@ -79,7 +79,7 @@ func (b *Book) Get(fenKey string) ([]*BookEntry, bool) {
 
 func (b *Book) Add(fenKey, sanMove string) error {
 	board := fen.FENtoBoard(fenKey)
-	fenKey = board.FENNoMoveClocks()
+	fenKey = board.FENKey()
 
 	uci, err := board.SANtoUCI(sanMove)
 	if err != nil {

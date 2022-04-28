@@ -30,7 +30,7 @@ type File struct {
 }
 
 func (f *File) Contains(fenKey string) bool {
-	fenKey = fenToKey(fenKey)
+	fenKey = fen.Key(fenKey)
 	if len(fenKey) == 0 {
 		return false
 	}
@@ -45,7 +45,7 @@ func (f *File) Contains(fenKey string) bool {
 }
 
 func (f *File) Add(fenKey string, ops ...Operation) *LineItem {
-	fenKey = fenToKey(fenKey)
+	fenKey = fen.Key(fenKey)
 	line := &LineItem{FEN: fenKey}
 	for _, op := range ops {
 		line.Ops = append(line.Ops, op)
@@ -56,7 +56,7 @@ func (f *File) Add(fenKey string, ops ...Operation) *LineItem {
 }
 
 func (f *File) Find(fenKey string) string {
-	fenKey = fenToKey(fenKey)
+	fenKey = fen.Key(fenKey)
 	if len(fenKey) == 0 {
 		return ""
 	}
@@ -135,6 +135,10 @@ func (line *LineItem) BestMove() string {
 	return line.GetString(OpCodeBestMove)
 }
 
+func (line *LineItem) SuppliedMove() string {
+	return line.GetString(OpCodeSuppliedMove)
+}
+
 func (line *LineItem) GetInt(opCode string) int {
 	for _, op := range line.Ops {
 		if op.OpCode == opCode {
@@ -191,7 +195,8 @@ func (line *LineItem) parseRawText() {
 			spaces++
 			charsInFENField = 0
 			if spaces == 4 {
-				line.FEN = line.RawText[:i]
+				// remove the en-passant square where it doesn't affect the position (domain reduction)
+				line.FEN = fen.Key(line.RawText[:i])
 				rest = line.RawText[i+1:]
 				break
 			}
@@ -202,7 +207,8 @@ func (line *LineItem) parseRawText() {
 
 	if spaces < 4 {
 		if spaces == 3 && charsInFENField > 0 {
-			line.FEN = line.RawText
+			// remove the en-passant square where it doesn't affect the position (domain reduction)
+			line.FEN = fen.Key(line.RawText)
 		}
 		return
 	}
@@ -301,18 +307,27 @@ func Dedupe(filename string) error {
 			seen[line.FEN] = i
 		} else {
 			if _, ok := dupes[line.FEN]; !ok {
+				// fen has 1 duplicate to check against
+
+				// remove whole-line matches
 				if line.String() == file.Lines[prevIdx].String() {
 					file.Lines = append(file.Lines[:i], file.Lines[i+1:]...)
 					i--
 					removed++
 					continue
 				}
+
+				// preserve when rest of line is different
 				dupes[line.FEN] = append(dupes[line.FEN], prevIdx, i)
 			} else {
+				// fen has more than 1 duplicate to check
+
 				prevDupes := dupes[line.FEN]
 				found := false
 				for j := 0; j < len(prevDupes); j++ {
 					prevIdx := prevDupes[j]
+
+					// remove whole-line matches
 					if line.String() == file.Lines[prevIdx].String() {
 						file.Lines = append(file.Lines[:i], file.Lines[i+1:]...)
 						i--
@@ -321,6 +336,8 @@ func Dedupe(filename string) error {
 						break
 					}
 				}
+
+				// preserve when rest of line is different
 				if !found {
 					dupes[line.FEN] = append(dupes[line.FEN], i)
 				}
@@ -329,14 +346,16 @@ func Dedupe(filename string) error {
 	}
 
 	if removed > 0 {
-		fmt.Printf("removed %d duplicate(s)\n", removed)
+		fmt.Printf("removed %d exact duplicate(s)\n", removed)
 		if err := file.Save(filename, true); err != nil {
 			return err
 		}
 	}
 
 	if len(dupes) == 0 {
-		logInfo("no duplicates found")
+		if removed == 0 {
+			logInfo("no duplicates found")
+		}
 		return nil
 	}
 
@@ -471,10 +490,6 @@ func fileExists(filename string) bool {
 		return false
 	}
 	return true
-}
-
-func fenToKey(fenKey string) string {
-	return fen.FENtoBoard(fenKey).FENNoMoveClocks()
 }
 
 func logInfo(msg string) {
