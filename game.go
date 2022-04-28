@@ -38,6 +38,7 @@ type Game struct {
 	ponderHits      int
 	totalPonders    int
 	humanEval       string
+	lastStateEvent  time.Time
 }
 
 func NewGame(gameID string, input chan<- string, output <-chan string, book *polyglot.Book) *Game {
@@ -196,6 +197,8 @@ func (g *Game) handleGameFull(ndjson []byte) {
 }
 
 func (g *Game) handleGameState(ndjson []byte) {
+	g.lastStateEvent = time.Now()
+
 	var state api.State
 	if err := json.Unmarshal(ndjson, &state); err != nil {
 		log.Fatal(err)
@@ -318,8 +321,6 @@ func (g *Game) playMove(ndjson []byte, state api.State) {
 			g.input <- goCmd
 		}
 
-		start := time.Now()
-
 		fmt.Printf("%s thinking...\n", ts())
 
 		for item := range g.output {
@@ -329,34 +330,7 @@ func (g *Game) playMove(ndjson []byte, state api.State) {
 				bestMove = p[1]
 				for i := 2; i < len(p)-1; i++ {
 					if p[i] == "ponder" {
-						g.ponder = p[i+1]
-						g.totalPonders++
-
-						var pos string
-						if state.Moves == "" {
-							pos = fmt.Sprintf("position fen %s moves %s %s", startPosFEN, bestMove, g.ponder)
-						} else {
-							pos = fmt.Sprintf("position fen %s moves %s %s %s", startPosFEN, state.Moves, bestMove, g.ponder)
-						}
-
-						var goCmd string
-						elapsed := int(time.Since(start).Milliseconds())
-						if g.playerNumber == 0 {
-							goCmd = fmt.Sprintf("go ponder wtime %d winc %d btime %d binc %d",
-								state.WhiteTime-elapsed, state.WhiteInc,
-								state.BlackTime, state.BlackInc,
-							)
-						} else {
-							goCmd = fmt.Sprintf("go ponder wtime %d winc %d btime %d binc %d",
-								state.WhiteTime, state.WhiteInc,
-								state.BlackTime-elapsed, state.BlackInc,
-							)
-						}
-
-						g.input <- pos
-						g.input <- goCmd
-
-						g.pondering = true
+						g.ponderMove(p[i+1], state, bestMove)
 					} else if p[i] == "eval" {
 						g.humanEval = p[i+1]
 						if g.humanEval == "0.00" {
@@ -386,6 +360,37 @@ func (g *Game) playMove(ndjson []byte, state api.State) {
 	bestMoveSAN := board.UCItoSAN(bestMove)
 	fmt.Printf("%s game: %s (%d) our_time: %6v opp_time: %6v move: %s eval: %s\n",
 		ts(), g.opponent.Name, g.opponent.Rating, ourTime, opponentTime, bestMoveSAN, g.humanEval)
+}
+
+func (g *Game) ponderMove(ponderMoveUCI string, state api.State, playedMoveUCI string) {
+	g.ponder = ponderMoveUCI
+	g.totalPonders++
+
+	var pos string
+	if state.Moves == "" {
+		pos = fmt.Sprintf("position fen %s moves %s %s", startPosFEN, playedMoveUCI, g.ponder)
+	} else {
+		pos = fmt.Sprintf("position fen %s moves %s %s %s", startPosFEN, state.Moves, playedMoveUCI, g.ponder)
+	}
+
+	var goCmd string
+	elapsed := int(time.Since(g.lastStateEvent).Milliseconds()) - 100
+	if g.playerNumber == 0 {
+		goCmd = fmt.Sprintf("go ponder wtime %d winc %d btime %d binc %d",
+			state.WhiteTime-elapsed, state.WhiteInc,
+			state.BlackTime, state.BlackInc,
+		)
+	} else {
+		goCmd = fmt.Sprintf("go ponder wtime %d winc %d btime %d binc %d",
+			state.WhiteTime, state.WhiteInc,
+			state.BlackTime-elapsed, state.BlackInc,
+		)
+	}
+
+	g.input <- pos
+	g.input <- goCmd
+
+	g.pondering = true
 }
 
 func (g *Game) sendMoveToServer(bestMove string, offerDraw bool) error {
