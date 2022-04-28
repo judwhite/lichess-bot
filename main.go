@@ -20,6 +20,8 @@ import (
 )
 
 func main() {
+	rand.Seed(time.Now().UnixNano())
+
 	var (
 		botFlag              bool
 		updateEPDFilename    string
