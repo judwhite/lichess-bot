@@ -96,6 +96,17 @@ var (
 	pawnPaths = []int{-1, 1}
 )
 
+func (b *Board) String() string {
+	b.init()
+
+	var sb strings.Builder
+	for i := 0; i < 8; i++ {
+		sb.Write(b.Pos[i*8 : (i*8)+8])
+		sb.WriteByte('\n')
+	}
+	return sb.String()
+}
+
 func (b *Board) FENKey() string {
 	b.init()
 
@@ -153,19 +164,16 @@ func (b *Board) FENKey() string {
 	if ep == -1 {
 		fen.WriteByte('-')
 	} else {
-		enemyPiece := iif[byte](b.ActiveColor == WhitePieces, 'p', 'P')
+		enemyPiece := iif[byte](b.ActiveColor == WhitePieces, 'P', 'p')
+		offset := iif[int](b.ActiveColor == WhitePieces, 8, -8)
 
 		var flag bool
 		file := ep % 8
-		if file != 0 {
-			if b.Pos[ep-1] == enemyPiece {
-				flag = true
-			}
+		if file != 0 && b.Pos[ep+offset-1] == enemyPiece {
+			flag = true
 		}
-		if file != 7 {
-			if b.Pos[ep+1] == enemyPiece {
-				flag = true
-			}
+		if file != 7 && b.Pos[ep+offset+1] == enemyPiece {
+			flag = true
 		}
 
 		if !flag {

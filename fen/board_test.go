@@ -164,7 +164,7 @@ func TestMakeMoves(t *testing.T) {
 		{
 			start: "r1bqkb1r/pp3ppp/2n1pn2/2pp4/3P4/2N1PN2/PPP1BPPP/R1BQ1RK1 b kq - 3 6",
 			moves: strings.Split("c6b4 h2h4 b7b6 h4h5 g7g5", " "),
-			want:  "r1bqkb1r/p4p1p/1p2pn2/2pp2pP/1n1P4/2N1PN2/PPP1BPP1/R1BQ1RK1 w kq - 0 9",
+			want:  "r1bqkb1r/p4p1p/1p2pn2/2pp2pP/1n1P4/2N1PN2/PPP1BPP1/R1BQ1RK1 w kq g6 0 9",
 		},
 		{
 			start: "r1bqkb1r/p4p1p/1p2pn2/2pp2pP/1n1P4/2N1PN2/PPP1BPP1/R1BQ1RK1 w kq g6 0 9",
@@ -211,6 +211,16 @@ func TestMakeMoves(t *testing.T) {
 			moves: strings.Split("d2d4 g8f6 c2c4 e7e6 g2g3 f8b4 b1d2 d7d5 f1g2 e8g8", " "),
 			want:  "rnbq1rk1/ppp2ppp/4pn2/3p4/1bPP4/6P1/PP1NPPBP/R1BQK1NR w KQ - 2 6",
 		},
+		{
+			start: "rnbqkb1r/pp1p2pp/2n1p3/2p1Pp2/8/P1N2N2/1PPP1PPP/R1BQKB1R w KQkq - 0 1",
+			moves: []string{"b2b4"},
+			want:  "rnbqkb1r/pp1p2pp/2n1p3/2p1Pp2/1P6/P1N2N2/2PP1PPP/R1BQKB1R b KQkq - 0 1",
+		},
+		{
+			start: "rnbqkb1r/pp1p2pp/2n1p3/4Pp2/2p5/P1N2N2/1PPP1PPP/R1BQKB1R w KQkq - 0 1",
+			moves: []string{"b2b4"},
+			want:  "rnbqkb1r/pp1p2pp/2n1p3/4Pp2/1Pp5/P1N2N2/2PP1PPP/R1BQKB1R b KQkq b3 0 1",
+		},
 	}
 
 	for _, c := range cases {
@@ -222,7 +232,7 @@ func TestMakeMoves(t *testing.T) {
 
 			// assert
 			if c.want != got {
-				t.Errorf(fmt.Sprintf("\nwant: '%s'\ngot:  '%s'", c.want, got))
+				t.Errorf(fmt.Sprintf("\nwant: '%s'\ngot:  '%s'\nboard:\n%s\n", c.want, got, b.String()))
 			}
 		})
 	}
