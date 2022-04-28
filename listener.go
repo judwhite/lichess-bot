@@ -299,6 +299,8 @@ func (l *Listener) challengeBot() {
 	copy(bots, q.Bots)
 	l.botQueueMtx.Unlock()
 
+	first := true
+
 	var banned BannedBots
 	b, err := ioutil.ReadFile("banned.json")
 	if err == nil {
@@ -393,9 +395,10 @@ func (l *Listener) challengeBot() {
 				}
 
 				fmt.Printf("%d ", i)
-				time.Sleep(1 * time.Second)
+				time.Sleep(iif(first, 500*time.Millisecond, 1*time.Second))
 			}
 			fmt.Printf("\n")
+			first = false
 
 			// Send the challenge
 			resp := l.challenge(bot.User.ID, true, 60, 1, "random")
