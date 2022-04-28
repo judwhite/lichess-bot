@@ -131,6 +131,14 @@ func (line *LineItem) ACD() int {
 	return line.GetInt(OpCodeAnalysisCountDepth)
 }
 
+func (line *LineItem) CE() int {
+	return line.GetInt(OpCodeCentipawnEvaluation)
+}
+
+func (line *LineItem) DM() int {
+	return line.GetInt(OpCodeDirectMate)
+}
+
 func (line *LineItem) BestMove() string {
 	return line.GetString(OpCodeBestMove)
 }
@@ -455,8 +463,6 @@ func UpdateFile(ctx context.Context, filename string, opts AnalysisOptions) erro
 
 		if len(pvSAN) > 1 {
 			item.SetString("pm", pvSAN[1])
-		}
-		if len(pvSAN) > 0 {
 			item.SetString("pv", strings.Join(pvSAN, " "))
 		}
 
@@ -509,7 +515,7 @@ func LoadBook(filename string) (*polyglot.Book, error) {
 			continue
 		}
 
-		if err := book.Add(item.FEN, bestMoveSAN); err != nil {
+		if err := book.Add(item.FEN, bestMoveSAN, item.CE(), item.DM()); err != nil {
 			return nil, err
 		}
 	}

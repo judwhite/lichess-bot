@@ -17,9 +17,10 @@ type Book struct {
 }
 
 type BookEntry struct {
-	FEN     string `json:"fen"`
-	UCIMove string `json:"uci"`
-	Freq    uint16 `json:"freq"`
+	UCIMove string
+	Weight  uint16
+	CP      int
+	Mate    int
 
 	polyglotMove uint16
 }
@@ -64,7 +65,7 @@ func (b *Book) Get(fenKey string) ([]*BookEntry, bool) {
 
 				san := board.UCItoSAN(uciMove)
 
-				_, err := fmt.Fprintf(fp, "%s sm %s; weight %d;\n", fenKey, san, entry.Freq)
+				_, err := fmt.Fprintf(fp, "%s sm %s; weight %d;\n", fenKey, san, entry.Weight)
 				if err != nil {
 					log.Fatal(err)
 				}
@@ -77,7 +78,7 @@ func (b *Book) Get(fenKey string) ([]*BookEntry, bool) {
 	return nil, false
 }
 
-func (b *Book) Add(fenKey, sanMove string) error {
+func (b *Book) Add(fenKey, sanMove string, cp, mate int) error {
 	board := fen.FENtoBoard(fenKey)
 	fenKey = board.FENKey()
 
@@ -86,7 +87,12 @@ func (b *Book) Add(fenKey, sanMove string) error {
 		return err
 	}
 
-	b.book[fenKey] = append(b.book[fenKey], &BookEntry{FEN: fenKey, UCIMove: uci})
+	if board.ActiveColor == fen.BlackPieces {
+		cp *= -1
+		mate *= -1
+	}
+
+	b.book[fenKey] = append(b.book[fenKey], &BookEntry{UCIMove: uci, CP: cp, Mate: mate})
 
 	return nil
 }
@@ -144,7 +150,7 @@ func LoadBook(filename string) (*Book, error) {
 		move := (uint16(buf[8]) << 8) | uint16(buf[9])
 		freq := (uint16(buf[10]) << 8) | uint16(buf[11])
 
-		book.polyglotBook[key] = append(book.polyglotBook[key], &BookEntry{polyglotMove: move, Freq: freq})
+		book.polyglotBook[key] = append(book.polyglotBook[key], &BookEntry{polyglotMove: move, Weight: freq})
 	}
 
 	return &book, nil
