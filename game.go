@@ -371,7 +371,7 @@ func (g *Game) playMove(ndjson []byte, state api.State) {
 		}
 	}
 
-	offerDraw := g.likelyDraw > 10 && board.FullMove > 40
+	offerDraw := g.likelyDraw > 12 && board.FullMove > 40 && board.HalfmoveClock > 20
 	if err := g.sendMoveToServer(bestMove, offerDraw); err != nil {
 		// '{"error":"Not your turn, or game already over"}'
 		// TODO: we should handle the opponent resigning, flagging or aborting while we're thinking
