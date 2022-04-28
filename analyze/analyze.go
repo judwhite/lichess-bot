@@ -21,9 +21,8 @@ import (
 const SyzygyPath = "/home/jud/projects/tablebases/3-4-5:/home/jud/projects/tablebases/wdl6:/home/jud/projects/tablebases/dtz6" // TODO: get path from config file
 
 const startPosFEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
-const threads = 24
-const threadsHashMultiplier = 2048 // 24*2048 = 49152
-const hashMemory = threads * threadsHashMultiplier
+const threads = 28
+const hashMemory = 81920
 
 const multiPV = 8
 
@@ -85,25 +84,6 @@ type Move struct {
 
 type Evals []Eval
 
-func (e Evals) Find(uciMove string) (Eval, bool) {
-	evals := maxDepthEvals(e)
-	for _, eval := range evals {
-		if eval.UCIMove == uciMove {
-			return eval.Clone(), true
-		}
-	}
-	return Eval{}, false
-}
-
-func (e Evals) Contains(uciMove string) bool {
-	for _, eval := range e {
-		if eval.UCIMove == uciMove {
-			return true
-		}
-	}
-	return false
-}
-
 type Eval struct {
 	UCIMove    string   `json:"uci"`
 	Depth      int      `json:"depth"`
@@ -137,35 +117,11 @@ func (e Eval) Empty() bool {
 	return e.UCIMove == ""
 }
 
-func (e Eval) Clone() Eval {
-	clone := Eval{
-		UCIMove:    e.UCIMove,
-		Depth:      e.Depth,
-		SelDepth:   e.SelDepth,
-		MultiPV:    e.MultiPV,
-		CP:         e.CP,
-		Mate:       e.Mate,
-		Nodes:      e.Nodes,
-		NPS:        e.NPS,
-		TBHits:     e.TBHits,
-		Time:       e.Time,
-		UpperBound: e.UpperBound,
-		LowerBound: e.LowerBound,
-		PV:         e.PV,
-		Mated:      e.Mated,
-		Raw:        e.Raw,
-		DepthDelta: e.DepthDelta,
-	}
-	clone.PV = make([]string, len(e.PV))
-	copy(clone.PV, e.PV)
-	return clone
-}
-
-func (e Eval) POVCP(color fen.Color) int {
+func (e Eval) GlobalCP(color fen.Color) int {
 	return e.CP * int(color)
 }
 
-func (e Eval) POVMate(color fen.Color) int {
+func (e Eval) GlobalMate(color fen.Color) int {
 	return e.Mate * int(color)
 }
 
@@ -175,10 +131,10 @@ func (e Eval) String(color fen.Color) string {
 	}
 
 	if e.Mate != 0 {
-		return fmt.Sprintf("#%d", e.POVMate(color))
+		return fmt.Sprintf("#%d", e.GlobalMate(color))
 	}
 
-	s := fmt.Sprintf("%.2f", float64(e.POVCP(color)/100))
+	s := fmt.Sprintf("%.2f", float64(e.GlobalCP(color)/100))
 
 	if s == "+0.00" || s == "-0.00" {
 		return "0.00"
@@ -245,43 +201,6 @@ scoreLoop:
 	return eval
 }
 
-func bestEval(evals []Eval) Eval {
-	if len(evals) == 0 {
-		log.Fatalf("len(evals) = 0")
-	}
-
-	evals = maxDepthEvals(evals)
-	return evals[0].Clone()
-}
-
-func maxDepthEvals(evals []Eval) []Eval {
-	var maxDepth int
-	maxDepthEvals := make([]Eval, 0, 8)
-
-	// find maxDepth
-	for _, eval := range evals {
-		if eval.Depth > maxDepth {
-			maxDepth = eval.Depth
-			maxDepthEvals = maxDepthEvals[:0]
-		}
-		if eval.Depth == maxDepth {
-			maxDepthEvals = append(maxDepthEvals, eval)
-		}
-	}
-
-	sort.Slice(maxDepthEvals, func(i, j int) bool {
-		score1 := evals[i].Score()
-		score2 := evals[j].Score()
-
-		if score1 != score2 {
-			return score1 > score2
-		}
-		return evals[i].UCIMove < evals[j].UCIMove
-	})
-
-	return maxDepthEvals
-}
-
 func (a *Analyzer) getLines(ctx context.Context, opts AnalysisOptions, fenPos string) []Eval {
 	start := time.Now()
 
@@ -317,7 +236,7 @@ loop:
 				}
 			}
 
-			if strings.HasPrefix(line, "info ") && strings.Contains(line, "score") {
+			if strings.HasPrefix(line, "info") && strings.Contains(line, "score") {
 				eval := parseEval(line)
 				eval.Raw = line
 
@@ -376,8 +295,8 @@ loop:
 					}
 					if eval.Time >= minTimeMS {
 						board := fen.FENtoBoard(fenPos)
-						globalCP := eval.POVCP(board.ActiveColor)
-						globalMate := eval.POVMate(board.ActiveColor)
+						globalCP := eval.GlobalCP(board.ActiveColor)
+						globalMate := eval.GlobalMate(board.ActiveColor)
 						san := board.UCItoSAN(eval.UCIMove)
 
 						t := fmt.Sprintf("t=%5v/%v", time.Since(start).Round(time.Second), opts.MaxTime)
@@ -566,11 +485,12 @@ gameMovesLoop:
 		default:
 		}
 
-		evals = maxDepthEvals(evals)
-		bestMove := bestEval(evals)
+		//evals = maxDepthEvals(evals)
+		//bestMove := bestEval(evals)
+		bestMove := evals[0]
 
 		for _, eval := range evals {
-			logInfo(fmt.Sprintf("depth=%d move=%s pov_cp=%d", eval.Depth, eval.UCIMove, eval.POVCP(player)))
+			logInfo(fmt.Sprintf("depth=%d move=%s global_cp=%d", eval.Depth, eval.UCIMove, eval.GlobalCP(player)))
 		}
 
 		newMove := Move{
@@ -583,7 +503,7 @@ gameMovesLoop:
 		var playerMove Eval
 		for _, checkMove := range evals {
 			if checkMove.UCIMove == playerMoveUCI {
-				playerMove = checkMove.Clone()
+				playerMove = checkMove
 				break
 			}
 		}
@@ -593,7 +513,7 @@ gameMovesLoop:
 		}
 
 		if playerMove.Score() >= bestMove.Score() {
-			bestMove = playerMove.Clone()
+			bestMove = playerMove
 		}
 
 		// set played move + best move eval
@@ -608,8 +528,8 @@ gameMovesLoop:
 		bestMoveSAN := board.UCItoSAN(bestMove.UCIMove)
 		logInfo(fmt.Sprintf("%3d/%3d %3d. %-7s played_cp: %6d played_mate: %2d top_move: %-7s top_cp: %6d top_mate: %2d",
 			i+1, len(moves), (i+2)/2,
-			sanMove, playerMove.POVCP(player), playerMove.POVMate(player),
-			bestMoveSAN, bestMove.POVCP(player), bestMove.POVMate(player),
+			sanMove, playerMove.GlobalCP(player), playerMove.GlobalMate(player),
+			bestMoveSAN, bestMove.GlobalCP(player), bestMove.GlobalMate(player),
 		))
 	}
 
@@ -683,7 +603,7 @@ func (a *Analyzer) analyzePosition(ctx context.Context, opts AnalysisOptions, fe
 		return nil, fmt.Errorf("TODO: position '%s' is already game over", fenPos)
 	}
 
-	a.input <- fmt.Sprintf("setoption name MultiPV value 1")
+	a.input <- fmt.Sprintf("setoption name MultiPV value 2")
 	if len(moves) != 0 {
 		a.input <- fmt.Sprintf("go depth %d movetime %d searchmoves %s", opts.MaxDepth, opts.MaxTime.Milliseconds(), strings.Join(moves, " "))
 	} else {
@@ -697,22 +617,21 @@ func (a *Analyzer) analyzePosition(ctx context.Context, opts AnalysisOptions, fe
 
 	logInfo("")
 	//newestEvals := maxDepthEvals(evals)
-	player := board.ActiveColor
 	var best Eval
 	for _, eval := range evals {
 		if eval.Depth > best.Depth {
-			best = eval.Clone()
+			best = eval
 		} else if eval.Depth == best.Depth && eval.Score() > best.Score() {
-			best = eval.Clone()
+			best = eval
 		}
-		const wc, diff = 0.0, 0.0
 		//wc := evalWinningChances(eval)
 		//diff := diffWC(eval, bestMoveAtDepth)
 
 		san := board.UCItoSAN(eval.UCIMove)
 		//newestEvals = append(newestEvals, eval.Clone())
 
-		logInfo(fmt.Sprintf("    depth: %2d depth_delta: %2d move: %-7s %s cp: %6d mate: %3d wc: %6.2f wc_diff: %6.2f", eval.Depth, eval.DepthDelta, san, eval.UCIMove, eval.POVCP(player), eval.POVMate(player), wc, diff))
+		logInfo(fmt.Sprintf("    depth: %2d depth_delta: %2d move: %5s %-7s cp: %6d mate: %3d", eval.Depth, eval.DepthDelta, eval.UCIMove, san, eval.CP, eval.Mate))
+		// wc: %6.2f wc_diff: %6.2f" , wc, diff)
 	}
 	logInfo("")
 
@@ -726,7 +645,7 @@ func (a *Analyzer) analyzePosition(ctx context.Context, opts AnalysisOptions, fe
 
 	logInfo("")
 	logInfo(fmt.Sprintf("%3d/%3d %3d. top_move: %-7s top_cp: %6d top_mate: %3d",
-		1, 1, 1, board.UCItoSAN(best.UCIMove), best.POVCP(player), best.POVMate(player)))
+		1, 1, 1, board.UCItoSAN(best.UCIMove), best.CP, best.Mate))
 
 	return []Eval{best}, nil
 }
@@ -1108,59 +1027,7 @@ readyOKLoop:
 			a.input <- fmt.Sprintf("setoption name MultiPV value %d", multiPV)
 			a.input <- fmt.Sprintf("setoption name SyzygyPath value %s", SyzygyPath)
 			a.input <- fmt.Sprintf("setoption name UCI_AnalyseMode value true")
-			/*
-				setoption name Threads value 8
-				setoption name Hash value 14336
-				isready
-				setoption name SyzygyPath value /data/syz/345:/data/syz/dtz6:/data/syz/wdl6
-				setoption name UCI_AnalyseMode value true
-				setoption name MultiPV value 12
-				ucinewgame
-				isready
-				ucinewgame
-				position fen
-				go depth 32
-			*/
 
-			// setoption name Threads value 26
-			// setoption name Hash value 90000
-			// isready
-
-			//
-			/*
-
-			 */
-
-			// uci
-			// setoption name Threads value 24
-			// setoption name Hash value 49152
-			// setoption name SyzygyPath value /home/jud/projects/tablebases/3-4-5:/home/jud/projects/tablebases/wdl6:/home/jud/projects/tablebases/dtz6
-			// setoption name SyzygyPath value /data/syz/345:/data/syz/dtz6:/data/syz/wdl6
-			// setoption name UCI_AnalyseMode value true
-			// setoption name MultiPV value 12
-			// isready
-			// ucinewgame
-			// position fen XXXX
-			// go infinite
-			// stop
-			// isready
-			// go infinite searchmoves c5d4 f8e7 c6d4 d8c7 b7b5 g7g6 b7b6stop
-			// go infinite searchmoves b7b5 c5d4 g7g6 f8e7 d8c7
-			// go depth 45 searchmoves b7b5 c5d4 g7g6 d8c7
-			// d8b6 - clear loser (Qb6)
-			// setoption name MultiPV value 3
-			// go depth 50 searchmoves b7b5 c5d4 d8c7
-			/*
-				fo depth 34 seldepth 48 multipv 1 score cp -17 nodes 3221860987 nps 18742864 hashfull 422 tbhits 31 time 171898 pv b7b5 a2a3 d8b6 c3a2 f7f6 e3f2 c5d4 e5f6 d7f6 a2b4 c6b4 f2d4 f8c5 a3b4 c5b4 c2c3 b4c5 b2b4 c5d4 d1d4 b6d4 f3d4 c8d7 e2f3 e8e7 e1d2 e7d6 h2h4 h7h6 h4h5 h8e8 a1a5 e6e5 f4e5 d6e5 h1a1 f6e4 f3e4 d5e4 a5a6 a8a6 a1a6
-				info depth 34 seldepth 44 multipv 2 score cp -25 nodes 3221860987 nps 18742864 hashfull 422 tbhits 31 time 171898 pv g7g6 h2h4 h7h5 h1h3 c5d4 f3d4 f8e7 d1d2 e7h4 e1f1 h4e7 g2g4 h5h4 g4g5 c6d4 e3d4 b7b5 e2d3 e7c5 c3e2 d8b6 d2e3 b5b4 f1g2 a6a5 a1h1 c8a6 h3h4 h8h4 h1h4 e8e7 d3a6 c5d4 e2d4 b6a6 a2a3 a6b6 a3b4 a5b4 h4h7
-				info depth 34 seldepth 47 multipv 3 score cp -28 nodes 3221860987 nps 18742864 hashfull 422 tbhits 31 time 171898 pv c5d4 f3d4 f8c5 h2h4 h8f8 d1d2 c6d4 e3d4 c5d4 d2d4 f7f6 e1d2 d8b6 d4b6 d7b6 e5f6 g7f6 a1g1 e6e5 g2g4 e8e7 g4g5 c8f5 g5f6 e7f6 f4e5 f6e6 e2d3 b6c4 d2c1 a8c8 g1g3 c4e5 h1e1 e6d6 d3f5 f8f5
-				info depth 34 seldepth 49 multipv 4 score cp -29 nodes 3221860987 nps 18742864 hashfull 422 tbhits 31 time 171898 pv d8c7 d1d2 c5d4 f3d4 h7h5 h2h4 d7b6 b2b3 c8d7 e2d3 c6d4 e3d4 b6c8 a2a3 f8c5 d4c5 c7c5 a3a4 c8e7 c3e2 e8f8 b3b4 c5c7 c2c3 g7g6 e1f2 a8c8 h1c1 f8g7 e2d4 e7g8 a4a5 c7d8 g2g3 g8h6 f2g1 h6f5
-				info depth 33 seldepth 38 multipv 5 score cp -44 nodes 3221860987 nps 18742864 hashfull 422 tbhits 31 time 171898 pv b7b6 d1d2 c8b7 c3d1 c5d4 f3d4 c6a5 b2b3 d8c7 c2c3 f8e7 a1c1 a8c8 h2h4 h7h5 d1f2 a5c6 d2d1 g7g6 e1f1 e7a3 c1c2 c6d4 e3d4 d7b8 g2g4 b8c6 e2d3 c6d4 c3d4 c7d8 f1g2 c8c2 d1c2 a3e7 g4g5 e7b4
-				info depth 33 seldepth 44 multipv 6 score cp -51 nodes 3221860987 nps 18742864 hashfull 422 tbhits 31 time 171898 pv f8e7 a2a3 d8c7 d4c5 e7c5 e3c5 d7c5 d1d2 c5d7 e2d3 f7f6 e5f6 d7f6 e1d1 h8f8 h1e1 e8f7 b2b3 c8d7 d1c1 f7g8 g2g3 a8c8 c1b2 b7b5 c3a2 a6a5 a2c3 b5b4 c3b5 b4a3 a1a3 c7b8 f3d4 c6d4 b5d4 b8b6 d4f3 a5a4
-				info depth 34 currmove b7b6 cu
-			*/
-
-			// go infinite searchmoves c5d4 b7b5 f8e7
 			a.input <- "isready"
 		case "readyok":
 			if sentNewGame {
