@@ -41,7 +41,8 @@ type Game struct {
 	humanEval       string
 	lastStateEvent  time.Time
 
-	moves []SavedMove
+	moves   []SavedMove
+	seenPos map[string]int
 }
 
 type SavedMove struct {
@@ -56,6 +57,7 @@ func NewGame(gameID string, input chan<- string, output <-chan string, book *pol
 		input:        input,
 		output:       output,
 		book:         book,
+		seenPos:      make(map[string]int),
 	}
 }
 
@@ -331,15 +333,22 @@ func (g *Game) playMove(ndjson []byte, state api.State) {
 	var bestMove string
 
 	// check book
-	bookMoves, bookMoveFound := g.book.Get(board.FEN())
+	fenKey := board.FENKey()
+	bookMoves, bookMoveFound := g.book.Get(fenKey)
+	_, repetition := g.seenPos[fenKey]
+	g.seenPos[fenKey] += 1
+	if repetition {
+		fmt.Printf("%s %s - REPETITONS: %d\n", ts(), fenKey, g.seenPos[fenKey])
+		g.input <- "setoption name StartAgro value true"
+	}
 
-	if bookMoveFound {
+	if bookMoveFound && state.WhiteInc == 0 && state.BlackInc == 0 && !repetition {
 		n := rand.Intn(len(bookMoves)) // TODO: use freq field
 		bookMove := bookMoves[n]
 		bestMove = bookMove.UCIMove
 		g.humanEval = iif(bookMove.Mate == 0, fmt.Sprintf("%0.2f", float64(bookMove.CP)/100), fmt.Sprintf("M%d", bookMove.Mate))
 
-		fmt.Printf("!!! ^^^ !!! ^^^ %s (%s) %s came from book, eval %s\n", board.FEN(), board.UCItoSAN(bestMove), bestMove, g.humanEval)
+		fmt.Printf("%s %s - BOOK MOVE: %s (%s), eval %s\n", ts(), board.FEN(), board.UCItoSAN(bestMove), bestMove, g.humanEval)
 		g.bookMovesPlayed++
 
 		if ponderHit {
@@ -351,9 +360,6 @@ func (g *Game) playMove(ndjson []byte, state api.State) {
 
 		if bookMove.UCIPonder != "" {
 			g.ponderMove(bookMove.UCIPonder, state, bestMove)
-
-			ponderSAN := board.UCItoSAN(bookMove.UCIPonder)
-			fmt.Printf("ponder: %s (%s)\n", ponderSAN, bookMove.UCIPonder)
 		}
 	} else {
 		if ponderHit {
@@ -416,7 +422,7 @@ func (g *Game) playMove(ndjson []byte, state api.State) {
 	bestMoveSAN := board.UCItoSAN(bestMove)
 	tslbl := ts()
 	fullFEN := board.FEN()
-	fmt.Printf("%s game: %s (%d) our_time: %6v opp_time: %6v our_move: %s (%s) cur_eval: %s\n%s fen: %s",
+	fmt.Printf("%s game: %s (%d) | our_time: %6v opp_time: %6v | our_move: %s (%s) | eval: %s\n%s fen: %s\n",
 		tslbl, g.opponent.Name, g.opponent.Rating, ourTime, opponentTime, bestMoveSAN, bestMove, g.humanEval,
 		tslbl, fullFEN)
 
