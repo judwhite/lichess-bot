@@ -215,6 +215,8 @@ func (g *Game) handleGameFull(ndjson []byte) {
 		timeControl,
 	)
 
+	g.waitReady()
+
 	if game.Rated {
 		g.input <- "setoption name PlayBad value false"
 	} else {
@@ -228,6 +230,8 @@ func (g *Game) handleGameFull(ndjson []byte) {
 	}
 
 	g.input <- "ucinewgame"
+
+	g.waitReady()
 
 	g.playMove(ndjson, state)
 }
@@ -508,6 +512,15 @@ func (l *Listener) Playing() bool {
 		return false
 	}
 	return !l.activeGame.finished
+}
+
+func (g *Game) waitReady() {
+	g.input <- "isready"
+	for line := range g.output {
+		if line == "readyok" {
+			break
+		}
+	}
 }
 
 func iif[T any](condition bool, ifTrue, ifFalse T) T {
