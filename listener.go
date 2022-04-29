@@ -441,7 +441,17 @@ func (l *Listener) challengeBot() {
 			first = false
 
 			// Send the challenge
-			resp := l.challenge(bot.User.ID, true, l.tc.Limit, l.tc.Increment, "random")
+			tcLimit, tcIncrement := l.tc.Limit, l.tc.Increment
+
+			// TODO: put this in the config file
+			// bots we like to play that have known time control preferences
+			switch strings.ToLower(bot.User.ID) {
+			case "torombot":
+				// bullet only with increment (even 0+1), blitz, rapid, bots only rated
+				tcLimit, tcIncrement = 0, 1
+			}
+
+			resp := l.challenge(bot.User.ID, true, tcLimit, tcIncrement, "random")
 			if l.Quit() {
 				return
 			}
