@@ -55,10 +55,7 @@ func (b *Book) Get(fenKey string) ([]*BookEntry, bool) {
 			if err != nil {
 				log.Fatal(err)
 			}
-			defer func() {
-				_ = fp.Sync()
-				_ = fp.Close()
-			}()
+			defer fp.Close()
 
 			for _, entry := range be {
 				uciMove := toUCIMove(board, entry.polyglotMove)
@@ -71,8 +68,9 @@ func (b *Book) Get(fenKey string) ([]*BookEntry, bool) {
 					log.Fatal(err)
 				}
 			}
-			//b.book[fenKey] = be
-			return nil, false
+
+			b.book[fenKey] = be
+			return be, true
 		}
 	}
 
