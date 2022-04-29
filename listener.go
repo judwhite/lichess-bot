@@ -334,9 +334,19 @@ type BannedBot struct {
 
 func (l *Listener) challengeBot() {
 	l.botQueueMtx.Lock()
+
 	q := l.botQueue
 	bots := make([]*api.BotInfo, len(q.Bots))
 	copy(bots, q.Bots)
+
+	// remove ourselves if we're in the list
+	for i := 0; i < len(bots); i++ {
+		if strings.EqualFold(bots[i].User.ID, botID) {
+			bots = append(bots[:i], bots[i+1:]...)
+			break
+		}
+	}
+
 	l.botQueueMtx.Unlock()
 
 	first := true
