@@ -456,7 +456,7 @@ func (l *Listener) challengeBot() {
 			}
 
 			if resp.CreateChallengeErr != nil {
-				banned.Banned = append(banned.Banned, BannedBot{ID: bot.User.ID, Reason: err.Error()})
+				banned.Banned = append(banned.Banned, BannedBot{ID: bot.User.ID, Reason: resp.CreateChallengeErr.Error()})
 				save()
 				i--
 				continue
