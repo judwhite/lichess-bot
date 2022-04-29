@@ -3,12 +3,14 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"log"
 	"math/rand"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -21,8 +23,9 @@ import (
 
 const botID = "trollololfish"
 const startPosFEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
+
 const maxRating = 4000
-const minRating = 2200
+const minRating = 2300
 
 type Listener struct {
 	ctx context.Context
@@ -42,12 +45,46 @@ type Listener struct {
 	declined         chan api.Challenge
 	accepted         chan api.GameEventInfo
 	onlyUser         string
+	tc               TimeControl
 
 	input  chan<- string
 	output <-chan string
 }
 
-func New(ctx context.Context, input chan<- string, output <-chan string, onlyUser, challenge string) *Listener {
+type TimeControl struct {
+	Limit     int
+	Increment int
+}
+
+func (tc *TimeControl) Parse(text string) error {
+	const tcMsg = "-tc needs to be in the format mins+secs, ex: 3+2, 1+0, 15+10, etc"
+
+	parts := strings.Split(text, "+")
+	if len(parts) != 2 {
+		return errors.New(tcMsg)
+	}
+
+	tcMins, err := strconv.Atoi(parts[0])
+	if err != nil {
+		return errors.New(tcMsg)
+	}
+
+	tcSecs, err := strconv.Atoi(parts[1])
+	if err != nil {
+		return errors.New(tcMsg)
+	}
+
+	if tcMins < 0 || tcSecs < 0 {
+		return errors.New(tcMsg)
+	}
+
+	tc.Limit = tcMins * 60
+	tc.Increment = tcSecs
+
+	return nil
+}
+
+func New(ctx context.Context, input chan<- string, output <-chan string, onlyUser, challenge string, tc TimeControl) *Listener {
 	l := Listener{
 		ctx:      ctx,
 		input:    input,
@@ -55,21 +92,24 @@ func New(ctx context.Context, input chan<- string, output <-chan string, onlyUse
 		declined: make(chan api.Challenge, 512),
 		accepted: make(chan api.GameEventInfo, 512),
 		onlyUser: strings.ToLower(onlyUser),
+		tc:       tc,
 	}
 	input <- "uci"
 	input <- "setoption name Ponder value true"
 	input <- fmt.Sprintf("setoption name SyzygyPath value %s", analyze.SyzygyPath)
 
-	if err := l.importBook("troll.epd"); err != nil {
-		log.Fatal(err)
-	}
-	if l.book != nil {
-		orig := l.book.PosCount()
-		fmt.Printf("book loaded, %d positions\n", orig)
-		if err := l.book.AddBook("book.bin"); err != nil {
+	if tc.Increment == 0 {
+		if err := l.importBook("troll.epd"); err != nil {
 			log.Fatal(err)
 		}
-		fmt.Printf("book loaded, %d positions\n", l.book.PosCount()-orig)
+		if l.book != nil {
+			orig := l.book.PosCount()
+			fmt.Printf("book loaded, %d positions\n", orig)
+			if err := l.book.AddBook("book.bin"); err != nil {
+				log.Fatal(err)
+			}
+			fmt.Printf("book loaded, %d positions\n", l.book.PosCount()-orig)
+		}
 	}
 
 	if onlyUser == "" {
@@ -88,7 +128,7 @@ func New(ctx context.Context, input chan<- string, output <-chan string, onlyUse
 	}
 
 	if challenge != "" {
-		l.challenge(challenge, false, 180, 2, "black")
+		l.challenge(challenge, false, tc.Limit, tc.Increment, "random")
 	}
 
 	return &l
@@ -401,7 +441,7 @@ func (l *Listener) challengeBot() {
 			first = false
 
 			// Send the challenge
-			resp := l.challenge(bot.User.ID, true, 60, 1, "random")
+			resp := l.challenge(bot.User.ID, true, l.tc.Limit, l.tc.Increment, "random")
 			if l.Quit() {
 				return
 			}

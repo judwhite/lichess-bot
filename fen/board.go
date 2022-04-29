@@ -9,6 +9,7 @@ import (
 )
 
 const startPosFEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
+const startPosFENKey = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq -"
 
 type Board struct {
 	Pos             [64]byte
@@ -105,6 +106,10 @@ func (b Board) String() string {
 }
 
 func (b Board) FENKey() string {
+	if b.Pos[0] == 0 {
+		return startPosFENKey
+	}
+
 	var fen strings.Builder
 	for i := 0; i < 8; i++ {
 		if i != 0 {
@@ -182,6 +187,10 @@ func (b Board) FENKey() string {
 }
 
 func (b Board) FEN() string {
+	if b.Pos[0] == 0 {
+		return startPosFEN
+	}
+
 	return fmt.Sprintf("%s %d %d", b.FENKey(), b.HalfmoveClock, b.FullMove)
 }
 

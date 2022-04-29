@@ -7,8 +7,11 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"math/rand"
 	"os"
 	"os/exec"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -17,6 +20,7 @@ import (
 	"trollfish-lichess/api"
 	"trollfish-lichess/epd"
 	"trollfish-lichess/fen"
+	"trollfish-lichess/polyglot"
 )
 
 func main() {
@@ -36,10 +40,12 @@ func main() {
 		analyzePGN           string
 		extractEPD           string
 		extractEPDPlies      int
+		tc                   string
 	)
 
 	var flags flag.FlagSet
 	flags.BoolVar(&botFlag, "bot", false, "runs the bot")
+	flags.StringVar(&tc, "tc", "1+1", "time control minutes+secs")
 	flags.StringVar(&updateEPDFilename, "update-epd", "", "run analysis and update an EPD file")
 	flags.StringVar(&dedupeEPDFilename, "dedupe-epd", "", "show duplicates in EPD file")
 	flags.StringVar(&freqPGNFilename, "freq-pgn", "", "show most common positions from a PGN file in EPD format (see also freq-count)")
@@ -66,7 +72,12 @@ func main() {
 	}
 
 	if botFlag {
-		runLichessBot(onlyUser, challenge)
+		var timeControl TimeControl
+		if err := timeControl.Parse(tc); err != nil {
+			log.Fatal(err)
+		}
+
+		runLichessBot(onlyUser, challenge, timeControl)
 		return
 	}
 
@@ -243,7 +254,7 @@ func positionLookup() {
 	fmt.Printf("%s\n", b)
 }
 
-func runLichessBot(onlyUser, challenge string) {
+func runLichessBot(onlyUser, challenge string, tc TimeControl) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -254,7 +265,7 @@ func runLichessBot(onlyUser, challenge string) {
 		log.Fatal(err)
 	}
 
-	listener := New(ctx, input, output, onlyUser, challenge)
+	listener := New(ctx, input, output, onlyUser, challenge, tc)
 
 	if err := listener.Events(); err != nil {
 		log.Fatal(err)

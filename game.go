@@ -111,9 +111,9 @@ func (g *Game) Finish() {
 	for i, move := range g.moves {
 		b := fen.FENtoBoard(move.FEN)
 
+		ourMove := i%2 == g.playerNumber
 		_, found := g.book.Get(move.FEN)
-		if !found && b.FullMove <= 20 {
-			ourMove := i%2 == g.playerNumber
+		if !found && ourMove && b.FullMove <= 20 {
 			_, err = fmt.Fprintf(fp, "%s sm %s; pl %s;\n", fen.Key(move.FEN), move.MoveSAN, iif(ourMove, "us", "them"))
 			if err != nil {
 				log.Fatal(err)
@@ -308,7 +308,6 @@ func (g *Game) playMove(ndjson []byte, state api.State) {
 				g.ponderHits++
 				ponderHit = true
 			}
-			g.ponder = ""
 		} else {
 			fmt.Printf("%s played: %s\n", ts(), playedSAN)
 		}
@@ -322,6 +321,8 @@ func (g *Game) playMove(ndjson []byte, state api.State) {
 
 		fmt.Printf("%s played: %s\n", ts(), playedSAN)
 	}
+
+	g.ponder = ""
 
 	var bestMove string
 
@@ -396,7 +397,7 @@ func (g *Game) playMove(ndjson []byte, state api.State) {
 		}
 	}
 
-	offerDraw := g.likelyDraw > 12 && board.FullMove > 40 && board.HalfmoveClock > 20
+	offerDraw := state.WhiteInc > 0 && state.BlackInc > 0 && g.likelyDraw > 12 && board.FullMove > 40 && board.HalfmoveClock > 16
 	if err := g.sendMoveToServer(bestMove, offerDraw); err != nil {
 		// '{"error":"Not your turn, or game already over"}'
 		// TODO: we should handle the opponent resigning, flagging or aborting while we're thinking
@@ -409,10 +410,13 @@ func (g *Game) playMove(ndjson []byte, state api.State) {
 	g.maybeGiveTime(ourTime, opponentTime)
 
 	bestMoveSAN := board.UCItoSAN(bestMove)
-	fmt.Printf("%s game: %s (%d) our_time: %6v opp_time: %6v move: %s eval: %s\n",
-		ts(), g.opponent.Name, g.opponent.Rating, ourTime, opponentTime, bestMoveSAN, g.humanEval)
+	tslbl := ts()
+	fullFEN := board.FEN()
+	fmt.Printf("%s game: %s (%d) our_time: %6v opp_time: %6v our_move: %s (%s) cur_eval: %s\n%s fen: %s",
+		tslbl, g.opponent.Name, g.opponent.Rating, ourTime, opponentTime, bestMoveSAN, bestMove, g.humanEval,
+		tslbl, fullFEN)
 
-	g.storeMove(board.FEN(), bestMoveSAN)
+	g.storeMove(fullFEN, bestMoveSAN)
 }
 
 func (g *Game) storeMove(fenPOS, moveSAN string) {
