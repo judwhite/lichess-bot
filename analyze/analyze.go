@@ -605,7 +605,7 @@ func (a *Analyzer) analyzePosition(ctx context.Context, opts AnalysisOptions, fe
 		return nil, fmt.Errorf("TODO: position '%s' is already game over", fenPos)
 	}
 
-	a.input <- fmt.Sprintf("setoption name MultiPV value 2")
+	a.input <- fmt.Sprintf("setoption name MultiPV value 1")
 	if len(moves) != 0 {
 		a.input <- fmt.Sprintf("go depth %d movetime %d searchmoves %s", opts.MaxDepth, opts.MaxTime.Milliseconds(), strings.Join(moves, " "))
 	} else {
@@ -636,6 +636,20 @@ func (a *Analyzer) analyzePosition(ctx context.Context, opts AnalysisOptions, fe
 		// wc: %6.2f wc_diff: %6.2f" , wc, diff)
 	}
 	logInfo("")
+
+	cpSum := 0
+	cpCount := 0
+	for _, eval := range evals {
+		if eval.UCIMove != best.UCIMove {
+			break
+		}
+		cpSum += eval.CP
+		cpCount++
+		if cpCount == 5 {
+			break
+		}
+	}
+	best.CP = cpSum / cpCount
 
 	//bestMove := bestEval(newestEvals).Clone()
 
