@@ -87,7 +87,7 @@ func main() {
 			MaxDepth:   80,
 			MinTime:    15 * time.Second,
 			MaxTime:    90 * time.Second,
-			DepthDelta: 5,
+			DepthDelta: 3,
 		}
 
 		if err := epd.UpdateFile(context.Background(), updateEPDFilename, opts); err != nil {
@@ -144,13 +144,13 @@ func main() {
 			log.Fatal(err)
 		}
 
-		file, err := epd.LoadFile("troll.epd")
+		file, err := epd.LoadFile("book.epd")
 		if err != nil {
 			log.Fatal(err)
 		}
 
 		for _, game := range db.Games {
-			board := fen.FENtoBoard(game.FEN)
+			board := fen.FENtoBoard(game.SetupFEN)
 			for i := 0; i < len(game.Moves) && i < extractEPDPlies; i++ {
 				move := game.Moves[i].UCI
 				board.Moves(move)
