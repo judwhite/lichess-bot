@@ -86,11 +86,6 @@ func (b *Book) Add(fenKey, sanMove string, cp, mate int, sanPonder string) error
 		return err
 	}
 
-	if board.ActiveColor == fen.BlackPieces {
-		cp *= -1
-		mate *= -1
-	}
-
 	var uciPonder string
 	if sanPonder != "" {
 		board.Moves(uci)
