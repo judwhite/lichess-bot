@@ -73,20 +73,12 @@
       "reason": "I'm not accepting challenges from bots."
     },
     {
-      "id": "resolved-bot",
-      "reason": "Please send me a casual challenge instead."
-    },
-    {
       "id": "mynameiswhatlol",
       "reason": "Please send me a casual challenge instead."
     },
     {
       "id": "sunfish_rs",
       "reason": "I'm not accepting challenges from bots."
-    },
-    {
-      "id": "dark_cloud_bot",
-      "reason": "This time control is too slow for me, please challenge again with a faster game."
     },
     {
       "id": "endogenetic-bot",
@@ -105,8 +97,20 @@
       "reason": "Please send me a casual challenge instead."
     },
     {
+      "id": "teamchelsie",
+      "reason": "never accepts"
+    },
+    {
       "id": "myknightdude",
-      "reason": "This time control is too slow for me, please challenge again with a faster game."
+      "reason": "bot owner tested us in casual then tried to farm us in rated and got wrecked :D always replies 'tooSlow' regardless of time control"
+    },
+    {
+      "id": "lazybot",
+      "reason": "seems to only accept challenges from non-bot accounts"
+    },
+    {
+      "id": "lazybotjr",
+      "reason": "seems to only accept challenges from non-bot accounts"
     }
   ]
 }
