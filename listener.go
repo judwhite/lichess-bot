@@ -25,7 +25,7 @@ const botID = "trollololfish"
 const startPosFEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
 
 const maxRating = 4000
-const minRating = 2300
+const minRating = 2400
 
 type Listener struct {
 	ctx context.Context
@@ -99,7 +99,7 @@ func New(ctx context.Context, input chan<- string, output <-chan string, onlyUse
 	input <- fmt.Sprintf("setoption name SyzygyPath value %s", analyze.SyzygyPath)
 
 	if tc.Increment == 0 {
-		if err := l.importBook("troll.epd"); err != nil {
+		if err := l.importBook("book.epd"); err != nil {
 			log.Fatal(err)
 		}
 		if l.book != nil {
