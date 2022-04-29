@@ -24,7 +24,6 @@ type Game struct {
 	gaveTime     bool
 	opponent     api.Player
 	finished     bool
-	likelyDraw   int
 
 	chatPlayerRoomNoTalking    bool
 	chatSpectatorRoomNoTalking bool
@@ -40,6 +39,8 @@ type Game struct {
 	totalPonders    int
 	humanEval       string
 	lastStateEvent  time.Time
+
+	consecutiveFullMovesWithZeroEval int
 
 	moves   []SavedMove
 	seenPos map[string]int
@@ -309,13 +310,13 @@ func (g *Game) playMove(ndjson []byte, state api.State) {
 
 		if g.ponder != "" && g.pondering {
 			predictedSAN := board.UCItoSAN(g.ponder)
-			fmt.Printf("%s played: %s predicted: %s\n", ts(), playedSAN, predictedSAN)
+			fmt.Printf("%s their move: %s predicted: %s\n", ts(), playedSAN, predictedSAN)
 			if g.ponder == opponentMoveUCI {
 				g.ponderHits++
 				ponderHit = true
 			}
 		} else {
-			fmt.Printf("%s played: %s\n", ts(), playedSAN)
+			fmt.Printf("%s their move: %s\n", ts(), playedSAN)
 		}
 		board.Moves(opponentMoveUCI)
 	} else if len(moves) > 0 {
@@ -396,9 +397,9 @@ func (g *Game) playMove(ndjson []byte, state api.State) {
 					} else if p[i] == "eval" {
 						g.humanEval = p[i+1]
 						if g.humanEval == "0.00" {
-							g.likelyDraw++
+							g.consecutiveFullMovesWithZeroEval++
 						} else {
-							g.likelyDraw = 0
+							g.consecutiveFullMovesWithZeroEval = 0
 						}
 					}
 				}
@@ -407,7 +408,11 @@ func (g *Game) playMove(ndjson []byte, state api.State) {
 		}
 	}
 
-	offerDraw := state.WhiteInc > 0 && state.BlackInc > 0 && g.likelyDraw > 12 && board.FullMove > 40 && board.HalfmoveClock > 16
+	goForDirtyFlag := ourTime > opponentTime && opponentTime < 5*time.Second || ourTime > opponentTime*3/2
+	tcHasIncrement := state.WhiteInc > 0 && state.BlackInc > 0
+	gameIsEqual := g.consecutiveFullMovesWithZeroEval > 12 && board.FullMove > 40 && board.HalfmoveClock > 16
+	offerDraw := gameIsEqual && tcHasIncrement && !goForDirtyFlag
+
 	if err := g.sendMoveToServer(bestMove, offerDraw); err != nil {
 		// '{"error":"Not your turn, or game already over"}'
 		// TODO: we should handle the opponent resigning, flagging or aborting while we're thinking
