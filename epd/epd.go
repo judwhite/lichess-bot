@@ -1,9 +1,11 @@
 package epd
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io/ioutil"
+	"log"
 	"os"
 	"path/filepath"
 	"sort"
@@ -11,9 +13,12 @@ import (
 	"strings"
 	"time"
 
+	"gopkg.in/yaml.v3"
+
 	"trollfish-lichess/analyze"
 	"trollfish-lichess/fen"
 	"trollfish-lichess/polyglot"
+	"trollfish-lichess/yamlbook"
 )
 
 const (
@@ -72,7 +77,14 @@ func (f *File) Find(fenKey string) string {
 }
 
 func (f *File) Save(filename string, backup bool) error {
-	b := []byte(f.String())
+	return f.save(filename, backup, f.String())
+}
+
+func (f *File) SaveAsYAMLBook(filename string, backup bool) error {
+	return f.save(filename, backup, f.YAML())
+}
+
+func (f *File) save(filename string, backup bool, data string) error {
 	if backup && fileExists(filename) {
 		ext := filepath.Ext(filename)
 		backupFilename := fmt.Sprintf("%s-%d%s.backup", strings.TrimSuffix(filename, ext), time.Now().UnixMilli(), ext)
@@ -80,7 +92,7 @@ func (f *File) Save(filename string, backup bool) error {
 			return fmt.Errorf("error creating backup file '%s': %v", backupFilename, err)
 		}
 	}
-	if err := ioutil.WriteFile(filename, b, 0644); err != nil {
+	if err := ioutil.WriteFile(filename, []byte(data), 0644); err != nil {
 		return fmt.Errorf("write file '%s': %v", filename, err)
 	}
 	return nil
@@ -93,6 +105,65 @@ func (f *File) String() string {
 		sb.WriteByte('\n')
 	}
 	return sb.String()
+}
+
+func (f *File) AsYAMLBook() yamlbook.Book {
+	var book yamlbook.Book
+	posMap := make(map[string]*yamlbook.Position)
+	for _, line := range f.Lines {
+		pv := line.GetString("pv")
+		if pv == "" {
+			pv = line.BestMove()
+		}
+
+		move := &yamlbook.Move{
+			Move:   line.BestMove(),
+			CP:     line.CE(),
+			Mate:   line.DM(),
+			Ponder: line.GetString("pm"),
+			TS:     time.Now().Unix(),
+			Engine: &yamlbook.Engine{
+				ID: "",
+				Output: []*yamlbook.EngineOutput{{
+					yamlbook.LogLine{
+						Depth: line.ACD(),
+						Nodes: line.GetInt("acn"),
+						CP:    line.CE(),
+						Mate:  line.DM(),
+						Time:  line.GetInt("acs") * 1000,
+						PV:    pv,
+					}}},
+			},
+		}
+
+		pos, ok := posMap[line.FEN]
+
+		if !ok {
+			pos := &yamlbook.Position{
+				FEN:   line.FEN,
+				Moves: []*yamlbook.Move{move},
+			}
+
+			book.Positions = append(book.Positions, pos)
+			posMap[line.FEN] = pos
+		} else {
+			pos.Moves = append(pos.Moves, move)
+		}
+	}
+
+	return book
+}
+
+func (f *File) YAML() string {
+	book := f.AsYAMLBook()
+
+	var buf bytes.Buffer
+	enc := yaml.NewEncoder(&buf)
+	if err := enc.Encode(book.Positions); err != nil {
+		log.Fatal(err)
+	}
+
+	return buf.String()
 }
 
 type LineItem struct {
@@ -354,7 +425,7 @@ func Dedupe(filename string) error {
 		}
 	}
 
-	// check for dupes where only one has a best move
+	// check for duplicate lines where only one line has a 'best move' entry
 	for key, indexes := range dupes {
 		bestMoveIndex := -1
 		weightIndex := -1
