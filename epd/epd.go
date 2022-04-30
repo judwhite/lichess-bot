@@ -118,11 +118,13 @@ func (f *File) AsYAMLBook() yamlbook.Book {
 
 		white := strings.Contains(line.FEN, " w ")
 		povMultiplier := iif(white, 1, -1) // we want to turn cp and mate back to their pov representation
+		cp := line.CE() * povMultiplier
+		mate := line.DM() * povMultiplier
 
 		move := &yamlbook.Move{
 			Move: line.BestMove(),
-			CP:   line.CE() * povMultiplier,
-			Mate: line.DM() * povMultiplier,
+			CP:   cp,
+			Mate: mate,
 			TS:   time.Now().Unix(),
 			Engine: &yamlbook.Engine{
 				ID: "sf15",
@@ -130,8 +132,8 @@ func (f *File) AsYAMLBook() yamlbook.Book {
 					yamlbook.LogLine{
 						Depth: line.ACD(),
 						Nodes: line.GetInt("acn"),
-						CP:    line.CE(),
-						Mate:  line.DM(),
+						CP:    cp,
+						Mate:  mate,
 						Time:  line.GetInt("acs") * 1000,
 						PV:    pv,
 					}}},
@@ -141,15 +143,17 @@ func (f *File) AsYAMLBook() yamlbook.Book {
 		pos, ok := posMap[line.FEN]
 
 		if !ok {
-			pos := &yamlbook.Position{
-				FEN:   line.FEN,
-				Moves: yamlbook.Moves{move},
+			pos := &yamlbook.Position{FEN: line.FEN}
+			if move.Move != "" {
+				pos.Moves = yamlbook.Moves{move}
 			}
 
 			book.Positions = append(book.Positions, pos)
 			posMap[line.FEN] = pos
 		} else {
-			pos.Moves = append(pos.Moves, move)
+			if move.Move != "" {
+				pos.Moves = append(pos.Moves, move)
+			}
 		}
 	}
 
