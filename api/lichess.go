@@ -44,7 +44,7 @@ type PositionResults struct {
 
 func GetGames(username string, count int) (string, int, error) {
 	filename := username + ".pgn"
-	fp, err := os.OpenFile(filename, os.O_CREATE|os.O_WRONLY, 0644)
+	fp, err := os.OpenFile(filename, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
 	if err != nil {
 		return filename, 0, err
 	}
