@@ -2,13 +2,17 @@ package yamlbook
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io/ioutil"
 	"log"
 	"sort"
+	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 
+	"trollfish-lichess/api"
 	"trollfish-lichess/fen"
 )
 
@@ -41,15 +45,64 @@ func (m Moves) Len() int {
 	return len(m)
 }
 
+func (m Moves) ContainsEvalsFrom(engineID string) bool {
+	for _, move := range m {
+		if move.Engine != nil && move.Engine.ID == engineID {
+			return true
+		}
+	}
+	return false
+}
+
+func (m Moves) ContainsSAN(san string) bool {
+	for _, move := range m {
+		if move.Move == san {
+			return true
+		}
+	}
+	return false
+}
+
+func (m Moves) GetSAN(san string) *Move {
+	for _, move := range m {
+		if move.Move == san {
+			return move
+		}
+	}
+	return nil
+}
+
+func (m Moves) GetBestMoveByEval() *Move {
+	var bestMove *Move
+	for _, move := range m {
+		if bestMove == nil {
+			bestMove = move
+			continue
+		}
+
+		if move.Mate > bestMove.Mate {
+			bestMove = move
+			continue
+		}
+
+		if move.CP > bestMove.CP {
+			bestMove = move
+			continue
+		}
+	}
+
+	return bestMove
+}
+
 type Position struct {
 	FEN   string `yaml:"fen"`
-	Moves Moves  `yaml:"moves"`
+	Moves Moves  `yaml:"moves,omitempty"`
 }
 
 type Move struct {
 	Move   string  `yaml:"move,omitempty"`
 	Weight int     `yaml:"weight,omitempty"`
-	CP     int     `yaml:"cp,omitempty"`
+	CP     int     `yaml:"cp"`
 	Mate   int     `yaml:"mate,omitempty"`
 	TS     int64   `yaml:"ts,omitempty"`
 	Engine *Engine `yaml:"engine,omitempty"`
@@ -79,6 +132,32 @@ func (m *Move) UCI() string {
 	m.uci = uci
 
 	return m.uci
+}
+
+func (m *Move) GetLastLogLineFor(move string) LogLine {
+	if m.Engine == nil {
+		return LogLine{}
+	}
+
+	for _, output := range m.Engine.Output {
+		pvSANs := strings.Split(output.Line.PV, " ")
+		if len(pvSANs) == 0 {
+			continue
+		}
+		if pvSANs[0] == move {
+			return output.Line
+		}
+	}
+
+	return LogLine{}
+}
+
+func (m *Move) FEN() string {
+	if m.fen == "" {
+		log.Fatalf("internal error: fen not set %#v", m)
+	}
+
+	return m.fen
 }
 
 type Engine struct {
@@ -174,6 +253,8 @@ func (b *Book) Add(fenKey string, moves ...*Move) {
 	position, ok := b.posMap[fenKey]
 	if !ok {
 		position = &Position{FEN: fenKey}
+		b.posMap[fenKey] = position
+		b.Positions = append(b.Positions, position)
 	}
 
 	for _, move := range moves {
@@ -189,7 +270,7 @@ func (b *Book) Add(fenKey string, moves ...*Move) {
 	}
 
 	if anyHaveMove {
-		// if any have 'move', remove the entries that don't
+		// if any new entries have a SAN Move, remove the existing entries that don't
 		for i := 0; i < len(position.Moves); i++ {
 			if position.Moves[i].Move == "" {
 				position.Moves = append(position.Moves[:i], position.Moves[i+1:]...)
@@ -199,10 +280,44 @@ func (b *Book) Add(fenKey string, moves ...*Move) {
 		}
 	}
 
-	position.Moves = append(position.Moves, moves...)
+	// clobber where move is the same
+	for i := 0; i < len(position.Moves); i++ {
+		if position.Moves[i].Move == "" {
+			continue
+		}
+
+		for j := 0; j < len(moves); j++ {
+			if moves[j].Move != position.Moves[i].Move {
+				continue
+			}
+
+			position.Moves[i] = moves[j]
+			moves = append(moves[:j], moves[j+1:]...)
+			break
+		}
+	}
+
+	if len(moves) > 0 {
+		position.Moves = append(position.Moves, moves...)
+	}
 }
 
 func (b *Book) Save() error {
+	// remove blank moves (and any other data they might contain)
+	for _, pos := range b.Positions {
+		for i := 0; i < len(pos.Moves); i++ {
+			if pos.Moves[i].Move == "" || pos.Moves[i].Engine.ID == "lichess" && pos.Moves[i].Engine.Output[0].Line.Depth < 28 {
+				pos.Moves = append(pos.Moves[:i], pos.Moves[i+1:]...)
+				i--
+				continue
+			}
+		}
+
+		if len(pos.Moves) == 0 {
+			pos.Moves = nil
+		}
+	}
+
 	var buf bytes.Buffer
 	enc := yaml.NewEncoder(&buf)
 	if err := enc.Encode(b.Positions); err != nil {
@@ -211,6 +326,69 @@ func (b *Book) Save() error {
 
 	if err := ioutil.WriteFile(b.filename, buf.Bytes(), 0644); err != nil {
 		return fmt.Errorf("write file '%s': %v", b.filename, err)
+	}
+
+	return nil
+}
+
+func (b *Book) CheckOnlineDatabase(ctx context.Context, boardFEN string) error {
+	results, err := api.CloudEval(boardFEN, 5)
+	if err != nil {
+		if err == api.ErrNotFound {
+			return nil
+		}
+		return err
+	}
+
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	// minDepth
+	if results.Depth < 28 || len(results.PVs) == 0 {
+		return nil
+	}
+
+	board := fen.FENtoBoard(boardFEN)
+	povMultiplier := iif(board.ActiveColor == fen.WhitePieces, 1, -1)
+
+	for i, pv := range results.PVs {
+		pvUCI := strings.Split(pv.Moves, " ")
+		pvSAN := board.UCItoSANs(pvUCI...)
+
+		cp := pv.CP * povMultiplier
+		mate := pv.Mate * povMultiplier
+		ts := time.Now().Unix()
+
+		move := Move{
+			Move: pvSAN[0],
+			CP:   cp,
+			Mate: mate,
+			TS:   ts,
+			Engine: &Engine{
+				ID: "lichess",
+				Output: []*EngineOutput{{
+					Line: LogLine{
+						Depth:   results.Depth,
+						MultiPV: i + 1,
+						CP:      cp,
+						Mate:    mate,
+						Nodes:   results.KNodes * 1024,
+						PV:      strings.Join(pvSAN, " "),
+					},
+				}},
+			},
+		}
+
+		b.Add(boardFEN, &move)
+
+		fmt.Printf("attempting to update '%s' cp: %d with ts = %d\n", move.Move, move.CP, move.TS)
+	}
+
+	fmt.Printf("just called save... go check it out\n")
+
+	if err := b.Save(); err != nil {
+		return err
 	}
 
 	return nil
