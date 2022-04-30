@@ -116,8 +116,8 @@ func (g *Game) Finish() {
 
 		ourMove := i%2 == g.playerNumber
 		_, found := g.book.Get(move.FEN)
-		if !found && ourMove && b.FullMove <= 20 {
-			_, err = fmt.Fprintf(fp, "%s sm %s; pl %s;\n", fen.Key(move.FEN), move.MoveSAN, iif(ourMove, "us", "them"))
+		if !found && ourMove && b.FullMove <= 25 {
+			_, err = fmt.Fprintf(fp, "%s sm %s;\n", fen.Key(move.FEN), move.MoveSAN)
 			if err != nil {
 				log.Fatal(err)
 			}

@@ -3,6 +3,7 @@ package api
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"log"
@@ -12,11 +13,15 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"trollfish-lichess/fen"
 )
 
 const allRatings = "1600,1800,2000,2200,2500"
 const allSpeeds = "bullet,blitz,rapid,classical,correspondence"
 const startPosFEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
+
+var ErrNotFound = errors.New("http 404 error")
 
 type Move struct {
 	UCI           string `json:"uci"`
@@ -100,10 +105,17 @@ func GetGames(username string, count int) (string, int, error) {
 	return filename, downloaded, nil
 }
 
-func Lookup(fen, play string) (PositionResults, error) {
+type LookupDatabase string
+
+const (
+	Masters LookupDatabase = "masters"
+	Lichess LookupDatabase = "lichess"
+)
+
+func Lookup(db LookupDatabase, fen string, play ...string) (PositionResults, error) {
 	var result PositionResults
 
-	u, err := url.Parse("https://explorer.lichess.ovh/lichess")
+	u, err := url.Parse(fmt.Sprintf("https://explorer.lichess.ovh/%s", db))
 	if err != nil {
 		return result, err
 	}
@@ -112,8 +124,8 @@ func Lookup(fen, play string) (PositionResults, error) {
 		fen = startPosFEN
 	}
 	q.Add("fen", fen)
-	if play != "" {
-		q.Add("play", play)
+	if len(play) != 0 {
+		q.Add("play", strings.Join(play, ","))
 	}
 	q.Add("recentGames", "0")
 	q.Add("topGames", "0")
@@ -159,6 +171,77 @@ func Lookup(fen, play string) (PositionResults, error) {
 		result.Moves[i].DrawsPercent = draw
 		result.Moves[i].PopularityPercent = popularity
 		result.Moves[i].TotalGames = moveTotal
+	}
+
+	return result, nil
+}
+
+type CloudEvalResults struct {
+	FEN    string `json:"fen"`
+	KNodes int    `json:"knodes"`
+	Depth  int    `json:"depth"`
+	PVs    []PV   `json:"pvs"`
+}
+
+type PV struct {
+	Moves string `json:"moves"`
+	CP    int    `json:"cp"`
+	Mate  int    `json:"mate"`
+}
+
+func CloudEval(fenPos string, multiPV int) (CloudEvalResults, error) {
+	u, err := url.Parse("https://lichess.org/api/cloud-eval")
+	if err != nil {
+		return CloudEvalResults{}, err
+	}
+	q := u.Query()
+	if fenPos == "" || fenPos == "start" || fenPos == "startpos" {
+		fenPos = startPosFEN
+	}
+	q.Add("fen", fenPos)
+	q.Add("multiPv", strconv.Itoa(multiPV))
+	u.RawQuery = q.Encode()
+
+	resp, err := http.Get(u.String())
+	if err != nil {
+		return CloudEvalResults{}, err
+	}
+
+	defer resp.Body.Close()
+
+	b, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return CloudEvalResults{}, err
+	}
+
+	if resp.StatusCode != 200 {
+		if resp.StatusCode == 404 {
+			return CloudEvalResults{}, ErrNotFound
+		}
+		return CloudEvalResults{}, fmt.Errorf("http status code %d. %s", resp.StatusCode, b)
+	}
+
+	var result CloudEvalResults
+	if err := json.Unmarshal(b, &result); err != nil {
+		return CloudEvalResults{}, fmt.Errorf("%v. %s", err, b)
+	}
+
+	// unfortunately, this is the most convenient place to do the castling translation currently
+	for i := 0; i < len(result.PVs); i++ {
+		if len(result.PVs[i].Moves) == 0 {
+			continue
+		}
+
+		board := fen.FENtoBoard(fenPos)
+		moves := strings.Split(result.PVs[i].Moves, " ")
+		sans := board.UCItoSANs(moves...)
+
+		moves, err = board.SANtoUCIs(sans...)
+		if err != nil {
+			return CloudEvalResults{}, err
+		}
+
+		result.PVs[i].Moves = strings.Join(moves, " ")
 	}
 
 	return result, nil

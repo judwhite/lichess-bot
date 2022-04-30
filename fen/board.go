@@ -199,22 +199,57 @@ func Key(fen string) string {
 	return b.FENKey()
 }
 
+func (b Board) UCItoSANs(moves ...string) []string {
+	sanMoves := make([]string, 0, len(moves))
+	for _, move := range moves {
+		sanMoves = append(sanMoves, b.UCItoSAN(move))
+		b.Moves(move)
+	}
+	return sanMoves
+}
+
+func translateFRCUCI(piece byte, uci string) string {
+	switch piece {
+	case 'K':
+		switch uci {
+		case "e1h1":
+			return "e1g1"
+		case "e1a1":
+			return "e1c1"
+		}
+	case 'k':
+		switch uci {
+		case "e8h8":
+			return "e8g8"
+		case "e8a8":
+			return "e8c8"
+		}
+	}
+	return uci
+}
+
 func (b Board) UCItoSAN(move string) string {
 	if b.Pos[0] == 0 {
 		b.LoadFEN(startPosFEN)
 	}
 
 	fromUCI := move[:2]
-	toUCI := move[2:4]
 	var promote byte
 	if len(move) > 4 {
 		promote = upper(move[4])
 	}
 
-	from, to := uciToIndex(fromUCI), uciToIndex(toUCI)
+	from := uciToIndex(fromUCI)
 	piece := b.Pos[from]
+
+	move = translateFRCUCI(piece, move)
+
+	toUCI := move[2:4]
+	to := uciToIndex(toUCI)
+
 	isCapture := b.Pos[to] != ' '
 	movedPawn := piece == 'P' || piece == 'p'
+
 	if piece == ' ' {
 		panic(fmt.Errorf("there is no piece at %d (%s). move: %s fen: %s", from, fromUCI, move, b.FEN()))
 	}
@@ -320,12 +355,26 @@ func (b Board) UCItoSAN(move string) string {
 	return san.String()
 }
 
+func (b Board) SANtoUCIs(moves ...string) ([]string, error) {
+	uciMoves := make([]string, 0, len(moves))
+	for _, move := range moves {
+		uci, err := b.SANtoUCI(move)
+		if err != nil {
+			return nil, err
+		}
+		uciMoves = append(uciMoves, uci)
+		b.Moves(uci)
+	}
+	return uciMoves, nil
+}
+
 func (b Board) SANtoUCI(san string) (string, error) {
 	if b.Pos[0] == 0 {
 		b.LoadFEN(startPosFEN)
 	}
 
 	if len(san) < 2 {
+		panic(fmt.Errorf("'%s' is not a valid move in '%s'", san, b.FEN()))
 		return "", fmt.Errorf("'%s' is not a valid move in '%s'", san, b.FEN())
 	}
 
@@ -353,6 +402,8 @@ func (b Board) SANtoUCI(san string) (string, error) {
 			return move.UCI, nil
 		}
 	}
+
+	panic(fmt.Errorf("'%s' is not a valid move in '%s'", san, b.FEN()))
 
 	return "", fmt.Errorf("'%s' is not a valid move in '%s'", san, b.FEN())
 }
@@ -397,14 +448,19 @@ func (b *Board) Moves(moves ...string) *Board {
 		}
 
 		fromUCI := move[:2]
-		toUCI := move[2:4]
+
 		var promote byte
 		if len(move) > 4 {
 			promote = upper(move[4])
 		}
 
-		from, to := uciToIndex(fromUCI), uciToIndex(toUCI)
+		from := uciToIndex(fromUCI)
 		piece := b.Pos[from]
+
+		move = translateFRCUCI(piece, move)
+
+		toUCI := move[2:4]
+		to := uciToIndex(toUCI)
 
 		isCapture := b.Pos[to] != ' '
 		b.Pos[to] = piece

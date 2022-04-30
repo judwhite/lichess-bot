@@ -116,14 +116,16 @@ func (f *File) AsYAMLBook() yamlbook.Book {
 			pv = line.BestMove()
 		}
 
+		white := strings.Contains(line.FEN, " w ")
+		povMultiplier := iif(white, 1, -1) // we want to turn cp and mate back to their pov representation
+
 		move := &yamlbook.Move{
-			Move:   line.BestMove(),
-			CP:     line.CE(),
-			Mate:   line.DM(),
-			Ponder: line.GetString("pm"),
-			TS:     time.Now().Unix(),
+			Move: line.BestMove(),
+			CP:   line.CE() * povMultiplier,
+			Mate: line.DM() * povMultiplier,
+			TS:   time.Now().Unix(),
 			Engine: &yamlbook.Engine{
-				ID: "",
+				ID: "sf15",
 				Output: []*yamlbook.EngineOutput{{
 					yamlbook.LogLine{
 						Depth: line.ACD(),
@@ -141,7 +143,7 @@ func (f *File) AsYAMLBook() yamlbook.Book {
 		if !ok {
 			pos := &yamlbook.Position{
 				FEN:   line.FEN,
-				Moves: []*yamlbook.Move{move},
+				Moves: yamlbook.Moves{move},
 			}
 
 			book.Positions = append(book.Positions, pos)
@@ -188,14 +190,6 @@ func (line *LineItem) String() string {
 	}
 
 	return sb.String()
-}
-
-type AnalysisOptions struct {
-	MinDepth   int
-	MaxDepth   int
-	MinTime    time.Duration
-	MaxTime    time.Duration
-	DepthDelta int
 }
 
 // ACD returns the value for 'acd', the analysis count depth.
@@ -515,7 +509,7 @@ func Dedupe(filename string) error {
 	return nil
 }
 
-func UpdateFile(ctx context.Context, filename string, opts AnalysisOptions) error {
+func UpdateFile(ctx context.Context, filename string, opts analyze.AnalysisOptions) error {
 	analysisOpts := analyze.AnalysisOptions{
 		MinDepth:   opts.MinDepth,
 		MaxDepth:   opts.MaxDepth,
@@ -661,4 +655,11 @@ func LoadBook(filename string) (*polyglot.Book, error) {
 	}
 
 	return book, nil
+}
+
+func iif[T any](condition bool, ifTrue, ifFalse T) T {
+	if condition {
+		return ifTrue
+	}
+	return ifFalse
 }

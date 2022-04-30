@@ -10,6 +10,7 @@ import (
 	"math/rand"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -21,7 +22,16 @@ import (
 	"trollfish-lichess/epd"
 	"trollfish-lichess/fen"
 	"trollfish-lichess/polyglot"
+	"trollfish-lichess/yamlbook"
 )
+
+var defaultAnalysisOptions = analyze.AnalysisOptions{
+	MinDepth:   32,
+	MaxDepth:   80,
+	MinTime:    15 * time.Second,
+	MaxTime:    60 * time.Second,
+	DepthDelta: 6,
+}
 
 func main() {
 	rand.Seed(time.Now().UnixNano())
@@ -38,9 +48,11 @@ func main() {
 		onlyUser             string
 		challenge            string
 		analyzePGN           string
+		analyzeUseBook       string
 		extractEPD           string
 		extractEPDPlies      int
 		tc                   string
+		epdToYAMLBook        string
 	)
 
 	var flags flag.FlagSet
@@ -56,8 +68,10 @@ func main() {
 	flags.StringVar(&onlyUser, "only-user", "", "only accept challenges from this user")
 	flags.StringVar(&challenge, "challenge", "", "challenge lichess user")
 	flags.StringVar(&analyzePGN, "analyze-pgn", "", "analyze pgn file")
+	flags.StringVar(&analyzeUseBook, "analyze-use-book", "", "use saved position eval in YAML book")
 	flags.StringVar(&extractEPD, "extract-epd", "", "pgn file name")
 	flags.IntVar(&extractEPDPlies, "extract-epd-plies", 0, "number of plies to extract")
+	flags.StringVar(&epdToYAMLBook, "epd-to-yamlbook", "", "EPD file name to convert (new file will be <file>.yamlbook)")
 
 	if err := flags.Parse(os.Args[1:]); err != nil {
 		if err == flag.ErrHelp {
@@ -82,15 +96,7 @@ func main() {
 	}
 
 	if updateEPDFilename != "" {
-		opts := epd.AnalysisOptions{
-			MinDepth:   32,
-			MaxDepth:   80,
-			MinTime:    15 * time.Second,
-			MaxTime:    90 * time.Second,
-			DepthDelta: 3,
-		}
-
-		if err := epd.UpdateFile(context.Background(), updateEPDFilename, opts); err != nil {
+		if err := epd.UpdateFile(context.Background(), updateEPDFilename, defaultAnalysisOptions); err != nil {
 			log.Fatal(err)
 		}
 		return
@@ -100,6 +106,22 @@ func main() {
 		if err := epd.Dedupe(dedupeEPDFilename); err != nil {
 			log.Fatal(err)
 		}
+		return
+	}
+
+	if epdToYAMLBook != "" {
+		file, err := epd.LoadFile(epdToYAMLBook)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		ext := filepath.Ext(epdToYAMLBook)
+		yamlBookFilename := strings.TrimSuffix(epdToYAMLBook, ext) + ".yamlbook"
+
+		if err := file.SaveAsYAMLBook(yamlBookFilename, true); err != nil {
+			log.Fatal(err)
+		}
+
 		return
 	}
 
@@ -123,16 +145,20 @@ func main() {
 	}
 
 	if analyzePGN != "" {
-		opts := analyze.AnalysisOptions{
-			MinDepth:   18,
-			MaxDepth:   80,
-			MinTime:    5 * time.Second,
-			MaxTime:    1 * time.Minute,
-			DepthDelta: 3,
+		var (
+			book *yamlbook.Book
+			err  error
+		)
+
+		if analyzeUseBook != "" {
+			book, err = yamlbook.Load(analyzeUseBook)
+			if err != nil {
+				log.Fatal(err)
+			}
 		}
 
 		a := analyze.New()
-		if err := a.AnalyzePGNFile(context.Background(), opts, analyzePGN); err != nil {
+		if err := a.AnalyzePGNFile(context.Background(), defaultAnalysisOptions, analyzePGN, book); err != nil {
 			log.Fatal(err)
 		}
 		return
