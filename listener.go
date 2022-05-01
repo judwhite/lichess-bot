@@ -17,8 +17,7 @@ import (
 
 	"trollfish-lichess/analyze"
 	"trollfish-lichess/api"
-	"trollfish-lichess/epd"
-	"trollfish-lichess/polyglot"
+	"trollfish-lichess/yamlbook"
 )
 
 const botID = "trollololfish"
@@ -30,7 +29,7 @@ const minRating = 2400
 type Listener struct {
 	ctx context.Context
 
-	book *polyglot.Book
+	book *yamlbook.Book
 
 	activeGameMtx sync.Mutex
 	activeGame    *Game
@@ -99,16 +98,11 @@ func New(ctx context.Context, input chan<- string, output <-chan string, onlyUse
 	input <- fmt.Sprintf("setoption name SyzygyPath value %s", analyze.SyzygyPath)
 
 	if tc.Increment == 0 {
-		if err := l.importBook("book.epd"); err != nil {
+		if err := l.importBook("book.yamlbook"); err != nil {
 			log.Fatal(err)
 		}
 		if l.book != nil {
-			orig := l.book.PosCount()
-			fmt.Printf("book loaded, %d positions\n", orig)
-			if err := l.book.AddBook("book.bin"); err != nil {
-				log.Fatal(err)
-			}
-			fmt.Printf("book loaded, %d positions\n", l.book.PosCount()-orig)
+			fmt.Printf("book loaded, %d positions\n", l.book.PosCount())
 		}
 	}
 
@@ -141,10 +135,8 @@ func (l *Listener) importBook(filename string) error {
 	var err error
 
 	switch ext {
-	case ".bin":
-		l.book, err = polyglot.LoadBook(filename)
-	case ".epd":
-		l.book, err = epd.LoadBook(filename)
+	case ".yamlbook":
+		l.book, err = yamlbook.Load(filename)
 	default:
 		return fmt.Errorf("unknown book extension '%s'", ext)
 	}

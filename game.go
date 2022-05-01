@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"math/rand"
 	"os"
 	"strings"
 	"sync"
@@ -12,7 +11,7 @@ import (
 
 	"trollfish-lichess/api"
 	"trollfish-lichess/fen"
-	"trollfish-lichess/polyglot"
+	"trollfish-lichess/yamlbook"
 )
 
 type Game struct {
@@ -31,7 +30,7 @@ type Game struct {
 	input  chan<- string
 	output <-chan string
 
-	book            *polyglot.Book
+	book            *yamlbook.Book
 	bookMovesPlayed int
 	ponder          string
 	pondering       bool
@@ -51,7 +50,7 @@ type SavedMove struct {
 	MoveSAN string
 }
 
-func NewGame(gameID string, input chan<- string, output <-chan string, book *polyglot.Book) *Game {
+func NewGame(gameID string, input chan<- string, output <-chan string, book *yamlbook.Book) *Game {
 	return &Game{
 		gameID:       gameID,
 		playerNumber: -1,
@@ -115,9 +114,9 @@ func (g *Game) Finish() {
 		b := fen.FENtoBoard(move.FEN)
 
 		ourMove := i%2 == g.playerNumber
-		_, found := g.book.Get(move.FEN)
-		if !found && ourMove && b.FullMove <= 25 {
-			_, err = fmt.Fprintf(fp, "%s sm %s;\n", fen.Key(move.FEN), move.MoveSAN)
+		_, found := g.book.GetAll(move.FEN)
+		if !found && ourMove && b.FullMove <= 15 {
+			_, err = fmt.Fprintf(fp, "- fen: %s\n", fen.Key(move.FEN))
 			if err != nil {
 				log.Fatal(err)
 			}
@@ -335,7 +334,10 @@ func (g *Game) playMove(ndjson []byte, state api.State) {
 
 	// check book
 	fenKey := board.FENKey()
-	bookMoves, bookMoveFound := g.book.Get(fenKey)
+	bookMove, bookPonderUCI := g.book.BestMove(fenKey)
+	if board.FEN() == startPosFEN {
+		bookMove, bookPonderUCI = nil, ""
+	}
 	_, repetition := g.seenPos[fenKey]
 	g.seenPos[fenKey] += 1
 	if repetition {
@@ -343,11 +345,10 @@ func (g *Game) playMove(ndjson []byte, state api.State) {
 		g.input <- "setoption name StartAgro value true"
 	}
 
-	if bookMoveFound && state.WhiteInc == 0 && state.BlackInc == 0 && !repetition {
-		n := rand.Intn(len(bookMoves)) // TODO: use freq field
-		bookMove := bookMoves[n]
-		bestMove = bookMove.UCIMove
-		g.humanEval = iif(bookMove.Mate == 0, fmt.Sprintf("%0.2f", float64(bookMove.CP)/100), fmt.Sprintf("M%d", bookMove.Mate))
+	if bookMove != nil && state.WhiteInc == 0 && state.BlackInc == 0 && !repetition {
+		bestMove = bookMove.UCI()
+		povMultiplier := iif(g.playerNumber == 0, 1, -1)
+		g.humanEval = iif(bookMove.Mate == 0, fmt.Sprintf("%0.2f", float64(bookMove.CP*povMultiplier)/100), fmt.Sprintf("M%d", bookMove.Mate*povMultiplier))
 
 		fmt.Printf("%s %s - BOOK MOVE: %s (%s), eval %s\n", ts(), board.FEN(), board.UCItoSAN(bestMove), bestMove, g.humanEval)
 		g.bookMovesPlayed++
@@ -359,8 +360,8 @@ func (g *Game) playMove(ndjson []byte, state api.State) {
 			g.stopPondering()
 		}
 
-		if bookMove.UCIPonder != "" {
-			g.ponderMove(bookMove.UCIPonder, state, bestMove)
+		if bookPonderUCI != "" {
+			g.ponderMove(bookPonderUCI, state, bestMove)
 		}
 	} else {
 		if ponderHit {
@@ -472,7 +473,7 @@ func (g *Game) ponderMove(ponderMoveUCI string, state api.State, playedMoveUCI s
 	}
 
 	var goCmd string
-	elapsed := int(time.Since(state.MessageReceived).Milliseconds()) + 100
+	elapsed := int(time.Since(state.MessageReceived).Milliseconds())
 	whiteTime := state.WhiteTime - iif(g.playerNumber == 0, elapsed, 0)
 	whiteTime = max(whiteTime, 50)
 	blackTime := state.BlackTime - iif(g.playerNumber == 0, 0, elapsed)
