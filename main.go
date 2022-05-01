@@ -30,7 +30,7 @@ var defaultAnalysisOptions = analyze.AnalysisOptions{
 	MaxDepth:   80,
 	MinTime:    15 * time.Second,
 	MaxTime:    60 * time.Second,
-	DepthDelta: 6,
+	DepthDelta: 4,
 }
 
 func main() {
@@ -38,7 +38,7 @@ func main() {
 
 	var (
 		botFlag              bool
-		updateEPDFilename    string
+		updateBookFilename   string
 		dedupeEPDFilename    string
 		freqPGNFilename      string
 		freqMergeEPDFilename string
@@ -58,7 +58,7 @@ func main() {
 	var flags flag.FlagSet
 	flags.BoolVar(&botFlag, "bot", false, "runs the bot")
 	flags.StringVar(&tc, "tc", "1+1", "time control minutes+secs")
-	flags.StringVar(&updateEPDFilename, "update-epd", "", "run analysis and update an EPD file")
+	flags.StringVar(&updateBookFilename, "update-book", "", "run analysis and update a book")
 	flags.StringVar(&dedupeEPDFilename, "dedupe-epd", "", "show duplicates in EPD file")
 	flags.StringVar(&freqPGNFilename, "freq-pgn", "", "show most common positions from a PGN file in EPD format (see also freq-count)")
 	flags.StringVar(&freqMergeEPDFilename, "freq-merge-epd", "", "merge positions with an EPD file. only new positions are added.")
@@ -95,8 +95,12 @@ func main() {
 		return
 	}
 
-	if updateEPDFilename != "" {
-		if err := epd.UpdateFile(context.Background(), updateEPDFilename, defaultAnalysisOptions); err != nil {
+	if updateBookFilename != "" {
+		if err := UpdateFile(context.Background(), updateBookFilename, defaultAnalysisOptions); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
 			log.Fatal(err)
 		}
 		return
@@ -394,4 +398,81 @@ func startTrollFish(ctx context.Context, input <-chan string, output chan<- stri
 
 func ts() string {
 	return fmt.Sprintf("[%s]", time.Now().Format("2006-01-02 15:04:05.000"))
+}
+
+func UpdateFile(ctx context.Context, filename string, opts analyze.AnalysisOptions) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	file, err := yamlbook.Load(filename)
+	if err != nil {
+		return err
+	}
+
+	a := analyze.New()
+
+	wg, err := a.StartStockfish(ctx)
+	if err != nil {
+		return err
+	}
+
+	fens := file.NeedMoves()
+
+	pieceCount := func(s string) int {
+		var count int
+		for _, c := range s {
+			if unicode.IsDigit(c) || c == '/' {
+				continue
+			}
+			if c == ' ' {
+				break
+			}
+			count++
+		}
+		return count
+	}
+
+	sort.Slice(fens, func(i, j int) bool {
+		return pieceCount(fens[i]) > pieceCount(fens[j])
+	})
+
+	fmt.Printf("%d positions to analyze\n", len(fens))
+	pieceCountToPosCount := make(map[int]int)
+	for i := 0; i < len(fens); i++ {
+		pc := pieceCount(fens[i])
+		pieceCountToPosCount[pc] += 1
+	}
+	for i := 32; i >= 0; i-- {
+		posCount := pieceCountToPosCount[i]
+		if posCount == 0 {
+			continue
+		}
+		fmt.Printf("%2d pieces: %5d\n", i, posCount)
+	}
+
+	for i := 0; i < len(fens); i++ {
+		boardFEN := fens[i]
+		fmt.Printf("%s piece_count: %d\n", boardFEN, pieceCount(boardFEN))
+
+		evals, err := a.AnalyzePosition(ctx, opts, boardFEN)
+		if err != nil {
+			return err
+		}
+
+		if err := a.SaveEvalsToBook(file, boardFEN, evals); err != nil {
+			return err
+		}
+
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+	}
+
+	cancel()
+
+	if wg != nil {
+		wg.Wait()
+	}
+
+	return nil
 }

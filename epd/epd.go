@@ -514,14 +514,6 @@ func Dedupe(filename string) error {
 }
 
 func UpdateFile(ctx context.Context, filename string, opts analyze.AnalysisOptions) error {
-	analysisOpts := analyze.AnalysisOptions{
-		MinDepth:   opts.MinDepth,
-		MaxDepth:   opts.MaxDepth,
-		MinTime:    opts.MinTime,
-		MaxTime:    opts.MaxTime,
-		DepthDelta: opts.DepthDelta,
-	}
-
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -560,7 +552,7 @@ func UpdateFile(ctx context.Context, filename string, opts analyze.AnalysisOptio
 
 	for i := 0; i < len(filtered); i++ {
 		item := filtered[i]
-		evals, err := a.AnalyzePosition(ctx, analysisOpts, item.FEN)
+		evals, err := a.AnalyzePosition(ctx, opts, item.FEN)
 		if err != nil {
 			return err
 		}

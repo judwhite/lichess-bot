@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"log"
+	"math/rand"
 	"sort"
 	"strings"
 	"time"
@@ -63,6 +64,20 @@ func (m Moves) ContainsSAN(san string) bool {
 	return false
 }
 
+func (m Moves) HaveDifferentTimestamps() bool {
+	if len(m) < 2 {
+		return false
+	}
+
+	ts := m[0].TS
+	for i := 1; i < len(m); i++ {
+		if m[i].TS != ts {
+			return true
+		}
+	}
+	return false
+}
+
 func (m Moves) GetSAN(san string) *Move {
 	for _, move := range m {
 		if move.Move == san {
@@ -72,10 +87,15 @@ func (m Moves) GetSAN(san string) *Move {
 	return nil
 }
 
-func (m Moves) GetBestMoveByEval() *Move {
+func (m Moves) GetBestMoveByEval(preferUCI string) *Move {
 	var bestMove *Move
 	for _, move := range m {
 		if bestMove == nil {
+			bestMove = move
+			continue
+		}
+
+		if move.Mate == bestMove.Mate && move.CP == bestMove.CP && move.UCI() == preferUCI {
 			bestMove = move
 			continue
 		}
@@ -92,6 +112,14 @@ func (m Moves) GetBestMoveByEval() *Move {
 	}
 
 	return bestMove
+}
+
+func (m Moves) UCIs() []string {
+	ucis := make([]string, 0, len(m))
+	for _, move := range m {
+		ucis = append(ucis, move.UCI())
+	}
+	return ucis
 }
 
 type Position struct {
@@ -117,7 +145,7 @@ func (m *Move) UCI() string {
 	}
 
 	if m.fen == "" {
-		log.Fatalf("internal error: fen not set %#v", m)
+		panic(fmt.Errorf("internal error: fen not set %#v", m))
 	}
 
 	if m.Move == "" {
@@ -200,9 +228,30 @@ func Load(filename string) (*Book, error) {
 		return nil, err
 	}
 
+	seen := make(map[string]struct{})
+	for i := 0; i < len(book.Positions); i++ {
+		pos := book.Positions[i]
+
+		_, found := seen[pos.FEN]
+		if !found {
+			seen[pos.FEN] = struct{}{}
+			continue
+		}
+		if len(pos.Moves) > 0 {
+			panic(fmt.Errorf("position '%s' duplicated with moves", pos.FEN))
+		}
+		fmt.Printf("removed duplicate '%s'\n", pos.FEN)
+		book.Positions = append(book.Positions[:i], book.Positions[i+1:]...)
+		i--
+	}
+
 	for _, pos := range book.Positions {
 		sort.Sort(pos.Moves)
 		book.posMap[pos.FEN] = pos
+	}
+
+	if err := book.Save(); err != nil {
+		return nil, err
 	}
 
 	return &book, nil
@@ -392,4 +441,84 @@ func (b *Book) CheckOnlineDatabase(ctx context.Context, boardFEN string) error {
 	}
 
 	return nil
+}
+
+func NewMove(boardFEN string, move Move) *Move {
+	return &Move{
+		Move:   move.Move,
+		Weight: move.Weight,
+		CP:     move.CP,
+		Mate:   move.Mate,
+		TS:     move.TS,
+		Engine: move.Engine,
+		fen:    boardFEN,
+	}
+}
+
+func (b *Book) BestMove(fenPos string) (*Move, string) {
+	board := fen.FENtoBoard(fenPos)
+	fenKey := board.FENKey()
+	pos, ok := b.posMap[fenKey]
+	if !ok {
+		return nil, ""
+	}
+
+	sort.Sort(pos.Moves)
+	moves := pos.Moves
+
+	if len(moves) == 0 {
+		return nil, ""
+	}
+
+	var bestMove *Move
+
+	// TODO: add variance by weight
+	if len(moves) > 1 {
+		if moves[0].Mate != moves[1].Mate {
+			bestMove = moves[0]
+		} else {
+			if moves[0].CP-moves[1].CP < 10 {
+				n := rand.Intn(2)
+				bestMove = moves[n]
+			} else {
+				bestMove = moves[0]
+			}
+		}
+	} else {
+		bestMove = moves[0]
+	}
+
+	bestMove.fen = fenKey
+	bestMove.UCI()
+
+	line := bestMove.GetLastLogLineFor(bestMove.Move)
+	pvSANs := strings.Split(line.PV, " ")
+
+	if len(pvSANs) > 1 {
+		board.Moves(bestMove.UCI())
+		ponder, err := board.SANtoUCI(pvSANs[1])
+		if err != nil {
+			fmt.Printf("ERROR: %v !!!!!!!!!!!!\n", err)
+			ponder = ""
+		}
+		return bestMove, ponder
+	}
+
+	return bestMove, ""
+}
+
+func (b *Book) PosCount() int {
+	return len(b.posMap)
+}
+
+func (b *Book) NeedMoves() []string {
+	var fens []string
+
+	for _, pos := range b.Positions {
+		if len(pos.Moves) == 0 {
+			fens = append(fens, pos.FEN)
+		}
+	}
+
+	return fens
 }

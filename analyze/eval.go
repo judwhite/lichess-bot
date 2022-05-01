@@ -26,7 +26,6 @@ type Eval struct {
 	PV         []string `json:"pv"`
 	Mated      bool     `json:"mated,omitempty"`
 	Raw        string   `json:"-"`
-	DepthDelta int      `json:"delta"`
 }
 
 func (e Eval) Score() int {
@@ -70,8 +69,9 @@ func (e Eval) String(color fen.Color) string {
 }
 
 func parseEval(line string) Eval {
+	eval := Eval{Raw: line}
+
 	parts := strings.Split(line, " ")
-	var eval Eval
 
 scoreLoop:
 	for i := 1; i < len(parts); i++ {

@@ -137,9 +137,49 @@ func (a *Analyzer) AnalyzeGame(ctx context.Context, opts AnalysisOptions, pgn *f
 			if err := book.CheckOnlineDatabase(ctx, boardFEN); err != nil {
 				return err
 			}
+			bookMoves, _ = book.Get(boardFEN)
 		}
 
-		bestMove := bookMoves.GetBestMoveByEval()
+		updateBookMoves := bookMoves.HaveDifferentTimestamps() && !bookMoves.ContainsEvalsFrom("lichess")
+
+		if updateBookMoves {
+			ucis := bookMoves.UCIs()
+			fmt.Printf("UCIs: %v\n", ucis)
+
+			opts2 := opts
+			opts2.DepthDelta += 1
+			opts2.MinTime += 5 * time.Second
+			opts2.MaxTime += 20 * time.Second
+			opts2.MinDepth += 2
+
+			evals, err := a.AnalyzePosition(ctx, opts2, boardFEN, ucis...)
+			if err != nil {
+				return err
+			}
+
+			fmt.Printf("UCIs: %v\n", ucis)
+			fmt.Printf("len(bokMoves): %d\n", len(bookMoves))
+			fmt.Printf("len(evals): %d\n", len(evals))
+			for i := 0; i < len(bookMoves); i++ {
+				fmt.Printf("adding %s\n", evals[i].UCIMove)
+				bookMove := evalsToBookMove(boardFEN, "sf15", evals[i], evals)
+				book.Add(boardFEN, bookMove)
+				fmt.Printf("added %v\n", *bookMove)
+			}
+
+			if err := book.Save(); err != nil {
+				return err
+			}
+
+			bookMoves, _ = book.Get(boardFEN)
+			fmt.Printf("super sketchy code done, go check it out\n")
+			for _, bookMove := range bookMoves {
+				fmt.Printf("new: %s %v\n", bookMove.Move, *bookMove)
+			}
+		}
+
+		bestMove := bookMoves.GetBestMoveByEval(playerMoveUCI)
+		var secondBestMove *yamlbook.Move
 
 		if bestMove == nil {
 			logInfo("running engine to find best move...")
@@ -153,10 +193,15 @@ func (a *Analyzer) AnalyzeGame(ctx context.Context, opts AnalysisOptions, pgn *f
 			}
 
 			bestMove = evalsToBookMove(boardFEN, "sf15", evals[0], evals)
+			secondBestMove = evalsToBookMove(boardFEN, "sf15", evals[1], evals)
 
-			book.Add(boardFEN, bestMove)
+			book.Add(boardFEN, bestMove, secondBestMove)
 			if err := book.Save(); err != nil {
 				return err
+			}
+			bookMoves, _ = book.Get(boardFEN)
+			for _, bookMove := range bookMoves {
+				fmt.Printf("new: %s %v\n", bookMove.Move, *bookMove)
 			}
 		}
 
@@ -182,22 +227,39 @@ func (a *Analyzer) AnalyzeGame(ctx context.Context, opts AnalysisOptions, pgn *f
 		if playerMove == nil {
 			logInfo(fmt.Sprintf("playerMoveSAN: '%s' bestMove.Move: '%s'", playerMoveSAN, bestMove.Move))
 
+			opts2 := opts
+			opts2.DepthDelta += 1
+			opts2.MinTime += 5 * time.Second
+			opts2.MaxTime += 20 * time.Second
+			opts2.MinDepth += 2
+
 			// TODO: extract playerMove, bestMove from evals. may have gotten bestMove from analysis or book. handle both.
 			// TODO: make this work:
 			// evals, err = a.AnalyzePosition(ctx, opts, boardFEN, bestMove.UCIMove, playerMoveUCI)
 			logInfo(fmt.Sprintf("played move %s wasn't the best (best was %s) and eval not found in book. running engine to find player's move...", playerMoveSAN, bestMove.Move))
-			evals, err := a.AnalyzePosition(ctx, opts, boardFEN, playerMoveUCI)
+			evals, err := a.AnalyzePosition(ctx, opts2, boardFEN, bestMove.UCI(), playerMoveUCI)
 			if err != nil {
 				return err
 			}
 
-			// TODO: verify move SAN matches
-			if evals[0].UCIMove != playerMoveUCI {
-				panic(fmt.Errorf("evals[0].UCIMove '%s' != playerMoveUCI '%s'", evals[0].UCIMove, playerMoveUCI))
-			}
-			playerMove = evalsToBookMove(boardFEN, "sf15", evals[0], evals)
+			move1 := evalsToBookMove(boardFEN, "sf15", evals[0], evals)
+			move2 := evalsToBookMove(boardFEN, "sf15", evals[1], evals)
 
-			book.Add(boardFEN, playerMove)
+			if move1.UCI() != playerMoveUCI && move1.CP == move2.CP && move1.Mate == move2.Mate {
+				playerMove = move2
+				bestMove = move2
+			} else if move1.UCI() == playerMoveUCI {
+				playerMove = move1
+				bestMove = move2
+			} else if move2.UCI() == playerMoveUCI {
+				bestMove = move1
+				playerMove = move2
+			} else {
+				panic(fmt.Errorf("move1: %s move2: %s playerMoveUCI: %s bestMove: %s fen: %s\n\nevals:\n%#v\n",
+					move1.Move, move2.Move, playerMoveUCI, bestMove.UCI(), boardFEN, evals))
+			}
+
+			book.Add(boardFEN, move1, move2)
 			if err := book.Save(); err != nil {
 				return err
 			}
@@ -294,7 +356,7 @@ func (a *Analyzer) analyzePosition(ctx context.Context, opts AnalysisOptions, fe
 		a.input <- fmt.Sprintf("setoption name MultiPV value %d", len(moves))
 		a.input <- fmt.Sprintf("go depth %d movetime %d searchmoves %s", opts.MaxDepth, opts.MaxTime.Milliseconds(), strings.Join(moves, " "))
 	} else {
-		a.input <- fmt.Sprintf("setoption name MultiPV value 1")
+		a.input <- fmt.Sprintf("setoption name MultiPV value 2")
 		a.input <- fmt.Sprintf("go depth %d movetime %d", opts.MaxDepth, opts.MaxTime.Milliseconds())
 	}
 
@@ -303,8 +365,16 @@ func (a *Analyzer) analyzePosition(ctx context.Context, opts AnalysisOptions, fe
 		return nil, fmt.Errorf("no evaluations returned for fen '%s'", fenPos)
 	}
 
+	floorDepth := opts.MinDepth - opts.DepthDelta + 1
+	for i := 0; i < len(evals); i++ {
+		if evals[i].Depth < floorDepth {
+			evals = append(evals[:i], evals[i+1:]...)
+			i--
+			continue
+		}
+	}
+
 	logInfo("")
-	//newestEvals := maxDepthEvals(evals)
 	var best Eval
 	for _, eval := range evals {
 		if eval.Depth > best.Depth {
@@ -312,44 +382,54 @@ func (a *Analyzer) analyzePosition(ctx context.Context, opts AnalysisOptions, fe
 		} else if eval.Depth == best.Depth && eval.Score() > best.Score() {
 			best = eval
 		}
-		//wc := evalWinningChances(eval)
-		//diff := diffWC(eval, bestMoveAtDepth)
 
 		san := board.UCItoSAN(eval.UCIMove)
-		//newestEvals = append(newestEvals, eval.Clone())
 
-		logInfo(fmt.Sprintf("    depth: %2d depth_delta: %2d move: %5s %-7s cp: %6d mate: %3d", eval.Depth, eval.DepthDelta, eval.UCIMove, san, eval.CP, eval.Mate))
-		// wc: %6.2f wc_diff: %6.2f" , wc, diff)
+		logInfo(fmt.Sprintf("    depth: %2d move: %5s %-7s cp: %6d mate: %3d", eval.Depth, eval.UCIMove, san, eval.CP, eval.Mate))
 	}
 	logInfo("")
 
-	cpSum := 0
-	cpCount := 0
-	for _, eval := range evals {
-		if eval.UCIMove != best.UCIMove {
-			break
+	// average the CP score over the previous 5 moves
+	for _, move := range moves {
+		var sum, count int
+
+		maxDepth := 0
+		for i := 0; i < len(evals); i++ {
+			eval := evals[i]
+
+			if eval.UCIMove != move {
+				continue
+			}
+
+			if eval.Depth > maxDepth {
+				maxDepth = eval.Depth
+			}
+
+			// keep only the last 5 depths
+			if count >= 5 {
+				evals = append(evals[:i], evals[i+1:]...)
+				i--
+				continue
+			}
+
+			sum += eval.CP
+			count++
 		}
-		cpSum += eval.CP
-		cpCount++
-		if cpCount == 5 {
-			break
+
+		if count > 0 {
+			for _, eval := range evals {
+				if eval.UCIMove == move && eval.Depth == maxDepth {
+					eval.CP = sum / count
+				}
+			}
 		}
 	}
-	best.CP = cpSum / cpCount
-
-	//bestMove := bestEval(newestEvals).Clone()
-
-	/*for _, eval := range newestEvals {
-		san := board.UCItoSAN(eval.UCIMove)
-		diff := diffWC(eval, bestMove)
-		logInfo(fmt.Sprintf("*** depth: %d depth_delta: %d move: %-7s %s cp: %6d mate: %3d wc-diff: %0.2f", eval.Depth, eval.DepthDelta, san, eval.UCIMove, eval.POVCP(player), eval.POVMate(player), diff))
-	}*/
 
 	logInfo("")
 	logInfo(fmt.Sprintf("%3d/%3d %3d. top_move: %-7s top_cp: %6d top_mate: %3d",
 		1, 1, 1, board.UCItoSAN(best.UCIMove), best.CP, best.Mate))
 
-	return []Eval{best}, nil
+	return evals, nil
 }
 
 func debugEvalTable(startFEN string, movesEval Moves) string {
@@ -411,16 +491,42 @@ func debugEvalTable(startFEN string, movesEval Moves) string {
 	return sb.String()
 }
 
+func (a *Analyzer) SaveEvalsToBook(book *yamlbook.Book, boardFEN string, evals []Eval) error {
+	if len(evals) == 0 {
+		return nil
+	}
+
+	depth := evals[0].Depth
+	count := 0
+	for i := 0; i < len(evals); i++ {
+		if evals[i].Depth < depth {
+			break
+		}
+		count++
+	}
+
+	for i := 0; i < count; i++ {
+		bookMove := evalsToBookMove(boardFEN, "sf15", evals[i], evals)
+		book.Add(boardFEN, bookMove)
+	}
+
+	if err := book.Save(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func evalsToBookMove(boardFEN string, engineID string, moveEval Eval, evals []Eval) *yamlbook.Move {
 	board := fen.FENtoBoard(boardFEN)
 
-	move := &yamlbook.Move{
+	move := yamlbook.NewMove(boardFEN, yamlbook.Move{
 		Move:   board.UCItoSAN(moveEval.UCIMove),
 		CP:     moveEval.CP,
 		Mate:   moveEval.Mate,
 		TS:     time.Now().Unix(),
 		Engine: &yamlbook.Engine{ID: engineID},
-	}
+	})
 
 	for _, eval := range evals {
 		move.Engine.Log(yamlbook.LogLine{
