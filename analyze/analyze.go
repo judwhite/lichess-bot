@@ -389,9 +389,8 @@ func (a *Analyzer) analyzePosition(ctx context.Context, opts AnalysisOptions, fe
 	}
 	logInfo("")
 
-	// average the CP score over the previous 5 moves
 	for _, move := range moves {
-		var sum, count int
+		var count int
 
 		maxDepth := 0
 		for i := 0; i < len(evals); i++ {
@@ -412,16 +411,7 @@ func (a *Analyzer) analyzePosition(ctx context.Context, opts AnalysisOptions, fe
 				continue
 			}
 
-			sum += eval.CP
 			count++
-		}
-
-		if count > 0 {
-			for _, eval := range evals {
-				if eval.UCIMove == move && eval.Depth == maxDepth {
-					eval.CP = sum / count
-				}
-			}
 		}
 	}
 
