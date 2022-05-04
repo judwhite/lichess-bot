@@ -355,7 +355,7 @@ func (b *Book) Save() error {
 	// remove blank moves (and any other data they might contain)
 	for _, pos := range b.Positions {
 		for i := 0; i < len(pos.Moves); i++ {
-			if pos.Moves[i].Move == "" || pos.Moves[i].Engine.ID == "lichess" && pos.Moves[i].Engine.Output[0].Line.Depth < 28 {
+			if pos.Moves[i].Move == "" {
 				pos.Moves = append(pos.Moves[:i], pos.Moves[i+1:]...)
 				i--
 				continue
