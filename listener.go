@@ -77,7 +77,11 @@ func (tc *TimeControl) Parse(text string) error {
 		return errors.New(tcMsg)
 	}
 
-	tc.Limit = tcMins * 60
+	if tcMins >= 30 {
+		tc.Limit = tcMins
+	} else {
+		tc.Limit = tcMins * 60
+	}
 	tc.Increment = tcSecs
 
 	return nil
