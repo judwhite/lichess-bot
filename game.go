@@ -41,8 +41,9 @@ type Game struct {
 
 	consecutiveFullMovesWithZeroEval int
 
-	moves   []SavedMove
-	seenPos map[string]int
+	moves      []SavedMove
+	seenPos    map[string]int
+	playerBook map[string]MoveChances
 }
 
 type SavedMove struct {
@@ -342,9 +343,37 @@ func (g *Game) playMove(ndjson []byte, state api.State) {
 
 	// check book
 	fenKey := board.FENKey()
-	bookMove, bookPonderUCI := g.book.BestMove(fenKey)
-	if board.FEN() == startPosFEN {
-		bookMove, bookPonderUCI = nil, ""
+	var bookMoveUCI, bookPonderUCI string
+	var bookMoveCP, bookMoveMate int
+	if g.playerBook != nil {
+		moves, ok := g.playerBook[fenKey]
+		if ok {
+			bestMove := moves.BestMove()
+			if bestMove != nil {
+				bookMoveUCI = bestMove.MoveUCI
+				bookPonderUCI = bestMove.PonderUCI
+				bookMoveCP, bookMoveMate = 55555, 0
+
+				// check book to get eval
+				var bookMove2 *yamlbook.Move
+				bookMove2, bookPonderUCI2 := g.book.BestMove(fenKey)
+				if bookMove2 != nil && bookMove2.Move == bestMove.MoveSAN {
+					bookMoveCP, bookMoveMate = bookMove2.CP, bookMove2.Mate
+					bookPonderUCI = bookPonderUCI2
+				}
+
+				fmt.Printf("%s %s '%s' %s\n", ts(), bestMove.MoveSAN, fenKey, bestMove.GameText)
+			}
+		}
+	}
+
+	if board.FEN() != startPosFEN && bookMoveUCI == "" {
+		var bookMove *yamlbook.Move
+		bookMove, bookPonderUCI = g.book.BestMove(fenKey)
+		if bookMove != nil {
+			bookMoveUCI = bookMove.UCI()
+			bookMoveCP, bookMoveMate = bookMove.CP, bookMove.Mate
+		}
 	}
 	_, repetition := g.seenPos[fenKey]
 	g.seenPos[fenKey] += 1
@@ -353,10 +382,10 @@ func (g *Game) playMove(ndjson []byte, state api.State) {
 		g.input <- "setoption name StartAgro value true"
 	}
 
-	if bookMove != nil && state.WhiteInc == 0 && state.BlackInc == 0 && !repetition {
-		bestMove = bookMove.UCI()
+	if bookMoveUCI != "" && !repetition {
+		bestMove = bookMoveUCI
 		povMultiplier := iif(g.playerNumber == 0, 1, -1)
-		g.humanEval = iif(bookMove.Mate == 0, fmt.Sprintf("%0.2f", float64(bookMove.CP*povMultiplier)/100), fmt.Sprintf("M%d", bookMove.Mate*povMultiplier))
+		g.humanEval = iif(bookMoveMate == 0, fmt.Sprintf("%0.2f", float64(bookMoveCP*povMultiplier)/100), fmt.Sprintf("M%d", bookMoveMate*povMultiplier))
 
 		fmt.Printf("%s %s - BOOK MOVE: %s (%s), eval %s\n", ts(), board.FEN(), board.UCItoSAN(bestMove), bestMove, g.humanEval)
 		g.bookMovesPlayed++
