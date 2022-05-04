@@ -20,7 +20,7 @@ const SyzygyPath = "/home/jud/projects/tablebases/3-4-5:/home/jud/projects/table
 
 const startPosFEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
 const threads = 26
-const hashMemory = 40960
+const hashMemory = 40960 * 2
 
 // TODO: put in config
 const stockfishBinary = "/home/jud/projects/trollfish/stockfish/stockfish"
@@ -356,7 +356,7 @@ func (a *Analyzer) analyzePosition(ctx context.Context, opts AnalysisOptions, fe
 		a.input <- fmt.Sprintf("setoption name MultiPV value %d", len(moves))
 		a.input <- fmt.Sprintf("go depth %d movetime %d searchmoves %s", opts.MaxDepth, opts.MaxTime.Milliseconds(), strings.Join(moves, " "))
 	} else {
-		a.input <- fmt.Sprintf("setoption name MultiPV value 2")
+		a.input <- fmt.Sprintf("setoption name MultiPV value 3")
 		a.input <- fmt.Sprintf("go depth %d movetime %d", opts.MaxDepth, opts.MaxTime.Milliseconds())
 	}
 

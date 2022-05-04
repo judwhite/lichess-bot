@@ -112,17 +112,15 @@ loop:
 				}
 
 				board := fen.FENtoBoard(fenPos)
-				globalCP := eval.GlobalCP(board.ActiveColor)
-				globalMate := eval.GlobalMate(board.ActiveColor)
 				san := board.UCItoSAN(eval.UCIMove)
 
 				t := fmt.Sprintf("t=%5v/%v", time.Since(start).Round(time.Second), opts.MaxTime)
 				if delta >= opts.DepthDelta {
-					logInfo(fmt.Sprintf("%s delta %d >= %d @ depth %d. move: %7s %s cp: %d mate: %d", t, delta, opts.DepthDelta, eval.Depth, san, eval.UCIMove, globalCP, globalMate))
+					logInfo(fmt.Sprintf("%s delta %d >= %d @ depth %d. move: %7s %s cp: %d mate: %d", t, delta, opts.DepthDelta, eval.Depth, san, eval.UCIMove, eval.CP, eval.Mate))
 					ignoreDepthsGreaterThan = eval.Depth
 					a.input <- "stop"
 				} else {
-					logInfo(fmt.Sprintf("%s delta %d < %d  @ depth %d. move: %7s %s cp: %d mate: %d", t, delta, opts.DepthDelta, eval.Depth, san, eval.UCIMove, globalCP, globalMate))
+					logInfo(fmt.Sprintf("%s delta %d < %d  @ depth %d. move: %7s %s cp: %d mate: %d", t, delta, opts.DepthDelta, eval.Depth, san, eval.UCIMove, eval.CP, eval.Mate))
 				}
 			}
 
