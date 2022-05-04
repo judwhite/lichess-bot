@@ -101,13 +101,11 @@ func New(ctx context.Context, input chan<- string, output <-chan string, onlyUse
 	input <- "setoption name Ponder value true"
 	input <- fmt.Sprintf("setoption name SyzygyPath value %s", analyze.SyzygyPath)
 
-	if tc.Increment == 0 {
-		if err := l.importBook("book.yamlbook"); err != nil {
-			log.Fatal(err)
-		}
-		if l.book != nil {
-			fmt.Printf("book loaded, %d positions\n", l.book.PosCount())
-		}
+	if err := l.importBook("book.yamlbook"); err != nil {
+		log.Fatal(err)
+	}
+	if l.book != nil {
+		fmt.Printf("book loaded, %d positions\n", l.book.PosCount())
 	}
 
 	if onlyUser == "" {
@@ -278,24 +276,6 @@ func (l *Listener) QueueChallenge(c api.Challenge) error {
 	// no unlimited, correspondence, etc
 	if tc.Type != "clock" {
 		if err := api.DeclineChallenge(c.ID, "timeControl"); err != nil {
-			return err
-		}
-		return nil
-	}
-
-	// don't play without increment
-	if opp.Title == "BOT" {
-		if tc.Increment == 0 {
-			if err := api.DeclineChallenge(c.ID, "timeControl"); err != nil {
-				return err
-			}
-			return nil
-		}
-	}
-
-	// if below 1 minute, must include increment for human players
-	if tc.Limit < 60 && tc.Increment == 0 {
-		if err := api.DeclineChallenge(c.ID, "tooFast"); err != nil {
 			return err
 		}
 		return nil
