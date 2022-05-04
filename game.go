@@ -277,6 +277,8 @@ func (g *Game) handleGameState(ndjson []byte) {
 }
 
 func (g *Game) playMove(ndjson []byte, state api.State) {
+	start := time.Now()
+
 	g.Lock()
 	if g.finished {
 		g.Unlock()
@@ -419,6 +421,14 @@ func (g *Game) playMove(ndjson []byte, state api.State) {
 	tcHasIncrement := state.WhiteInc > 0 && state.BlackInc > 0
 	gameIsEqual := g.consecutiveFullMovesWithZeroEval > 12 && board.FullMove > 40 && board.HalfmoveClock > 16
 	offerDraw := gameIsEqual && tcHasIncrement && !goForDirtyFlag
+
+	if tcHasIncrement && ourTime >= 3*time.Second {
+		elapsed := time.Since(start)
+		delta := 400*time.Millisecond - elapsed
+		if delta > 0 {
+			time.Sleep(delta)
+		}
+	}
 
 	if err := g.sendMoveToServer(bestMove, offerDraw); err != nil {
 		// '{"error":"Not your turn, or game already over"}'
