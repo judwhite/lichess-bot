@@ -82,19 +82,19 @@ func GetGames(username string, count int) (string, int, error) {
 		return filename, 0, err
 	}
 	q := u.Query()
-	//q.Add("since", unixMilli(since))
+	//q.Add("since", unixMilli(time.Now().Add(-60*24*time.Hour)))
 	//q.Add("analysed", "true") // TODO: may want to turn this off
 	//q.Add("until", unixMilli(until))
 	q.Add("sort", "dateAsc")
 	q.Add("perfType", allSpeeds)
-	q.Add("evals", "true")
+	//q.Add("evals", "true")
 	q.Add("opening", "true")
 	q.Add("rated", "true")
 	if count > 0 {
 		q.Add("max", itoa(count))
 	}
 	q.Add("pgnInJson", "true")
-	q.Add("clocks", "true")
+	//q.Add("clocks", "true")
 	u.RawQuery = q.Encode()
 
 	endpoint := u.String()
