@@ -26,11 +26,11 @@ import (
 )
 
 var defaultAnalysisOptions = analyze.AnalysisOptions{
-	MinDepth:   32,
+	MinDepth:   34,
 	MaxDepth:   80,
-	MinTime:    15 * time.Second,
-	MaxTime:    60 * time.Second,
-	DepthDelta: 4,
+	MinTime:    60 * time.Second,
+	MaxTime:    30 * time.Minute,
+	DepthDelta: 3,
 }
 
 func main() {
