@@ -111,6 +111,46 @@
     {
       "id": "lazybotjr",
       "reason": "seems to only accept challenges from non-bot accounts"
+    },
+    {
+      "id": "dr-energy",
+      "reason": "http status code 400 'https://lichess.org/api/challenge/dr-energy' body: '{\"error\":\"BOT Dr-energy does not accept challenges.\"}'"
+    },
+    {
+      "id": "drsmartbugs",
+      "reason": "http status code 400 'https://lichess.org/api/challenge/drsmartbugs' body: '{\"error\":\"BOT DrSmartBugs only accepts challenges from friends.\"}'"
+    },
+    {
+      "id": "normalblitzbulletbot",
+      "reason": "never plays first move"
+    },
+    {
+      "id": "leamoreau",
+      "reason": "I'm not accepting challenges from bots."
+    },
+    {
+      "id": "polarchessbot",
+      "reason": "Please send me a casual challenge instead."
+    },
+    {
+      "id": "turochamp-2ply",
+      "reason": "I'm not accepting challenges from bots."
+    },
+    {
+      "id": "requinbot",
+      "reason": "I'm not accepting challenges with this time control."
+    },
+    {
+      "id": "lynx_bot",
+      "reason": "I'm not accepting challenges with this time control."
+    },
+    {
+      "id": "anarchychess-bot",
+      "reason": "bongcloud"
+    },
+    {
+      "id": "HikaruNakamuraBot",
+      "reason": "bongcloud"
     }
   ]
 }
