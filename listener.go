@@ -376,8 +376,9 @@ func (l *Listener) challengeBot() {
 
 	for i := 0; i < len(bots); i++ {
 		bot := bots[i]
-		bulletRating := bot.User.Perfs["bullet"].Rating
-		if bulletRating > maxRating || bulletRating < minRating {
+		bullet := bot.User.Perfs["bullet"]
+		bulletRating := bullet.Rating
+		if bulletRating > maxRating || bulletRating < minRating || bullet.Provisional {
 			bots = append(bots[:i], bots[i+1:]...)
 			i--
 			continue
