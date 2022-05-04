@@ -90,6 +90,12 @@ func (g *Game) StreamGameEvents() {
 	}
 }
 
+func (g *Game) IsFinished() bool {
+	g.Lock()
+	defer g.Unlock()
+	return g.finished
+}
+
 func (g *Game) Finish() {
 	g.Lock()
 	defer g.Unlock()
@@ -97,8 +103,8 @@ func (g *Game) Finish() {
 	if g.finished {
 		return
 	}
-	g.finished = true
 	g.stopPondering()
+	g.finished = true
 
 	fp, err := os.OpenFile("recent.epd", os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
 	if err != nil {
@@ -417,9 +423,10 @@ func (g *Game) playMove(ndjson []byte, state api.State) {
 	if err := g.sendMoveToServer(bestMove, offerDraw); err != nil {
 		// '{"error":"Not your turn, or game already over"}'
 		// TODO: we should handle the opponent resigning, flagging or aborting while we're thinking
-		fmt.Printf("*** ERR: api.PlayMove: %v: %s\n", err, string(ndjson))
+		fmt.Printf("%s *** ERR: api.PlayMove: %v: %s\n", ts(), err, string(ndjson))
 
 		g.Finish()
+		fmt.Printf("%s g.Finish() returned", ts())
 		return
 	}
 
@@ -523,7 +530,7 @@ func (l *Listener) Playing() bool {
 	if l.activeGame == nil {
 		return false
 	}
-	return !l.activeGame.finished
+	return !l.activeGame.IsFinished()
 }
 
 func (g *Game) waitReady() {
