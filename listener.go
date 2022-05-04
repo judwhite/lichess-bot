@@ -335,6 +335,16 @@ func (l *Listener) challengeBot() {
 		}
 	}
 
+	// remove soft-bans
+	for i := 0; i < len(banned.Banned); i++ {
+		ban := banned.Banned[i]
+		if strings.Contains(ban.Reason, "soft-ban") || ban.Reason == "I'm not accepting challenges at the moment." || ban.Reason == "This is not the right time for me, please ask again later." {
+			banned.Banned = append(banned.Banned[:i], banned.Banned[i+1:]...)
+			i--
+			continue
+		}
+	}
+
 	save := func() {
 		b, err := json.MarshalIndent(banned, "", "  ")
 		if err != nil {
