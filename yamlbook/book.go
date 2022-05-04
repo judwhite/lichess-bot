@@ -456,6 +456,9 @@ func NewMove(boardFEN string, move Move) *Move {
 }
 
 func (b *Book) BestMove(fenPos string) (*Move, string) {
+	if b == nil || b.posMap == nil {
+		return nil, ""
+	}
 	board := fen.FENtoBoard(fenPos)
 	fenKey := board.FENKey()
 	pos, ok := b.posMap[fenKey]
@@ -473,19 +476,17 @@ func (b *Book) BestMove(fenPos string) (*Move, string) {
 	var bestMove *Move
 
 	// TODO: add variance by weight
-	if len(moves) > 1 {
-		if moves[0].Mate != moves[1].Mate {
-			bestMove = moves[0]
-		} else {
-			if moves[0].CP-moves[1].CP < 10 {
-				n := rand.Intn(2)
-				bestMove = moves[n]
-			} else {
-				bestMove = moves[0]
-			}
+	bestMove = moves[0]
+	i := 1
+	for ; i < len(moves); i++ {
+		if moves[i].CP != bestMove.CP || moves[i].Mate != bestMove.Mate {
+			break
 		}
-	} else {
-		bestMove = moves[0]
+	}
+	if i > 1 {
+		n := rand.Intn(i)
+		bestMove = moves[n]
+		fmt.Printf("moves[0]: %s %d moves[n]: %s %d pick %s\n", moves[0].Move, moves[0].CP, moves[n].Move, moves[n].CP, bestMove.Move)
 	}
 
 	bestMove.fen = fenKey
