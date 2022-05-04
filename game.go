@@ -448,7 +448,7 @@ func (g *Game) playMove(ndjson []byte, state api.State) {
 
 	goForDirtyFlag := ourTime > opponentTime && opponentTime < 5*time.Second || ourTime > opponentTime*3/2
 	tcHasIncrement := state.WhiteInc > 0 && state.BlackInc > 0
-	gameIsEqual := g.consecutiveFullMovesWithZeroEval > 12 && board.FullMove > 40 && board.HalfmoveClock > 16
+	gameIsEqual := g.consecutiveFullMovesWithZeroEval > 12 && board.FullMove > 40 && board.HalfmoveClock > 4
 	offerDraw := gameIsEqual && tcHasIncrement && !goForDirtyFlag
 
 	if tcHasIncrement && ourTime >= 3*time.Second {
