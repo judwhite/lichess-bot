@@ -12,16 +12,15 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"trollfish-lichess/analyze"
 	"trollfish-lichess/api"
 	"trollfish-lichess/epd"
 	"trollfish-lichess/fen"
-	"trollfish-lichess/polyglot"
 	"trollfish-lichess/yamlbook"
 )
 
@@ -53,6 +52,9 @@ func main() {
 		extractEPDPlies      int
 		tc                   string
 		epdToYAMLBook        string
+		bustedPGNFile        string
+		bustedPlayer         string
+		bustedColor          string
 	)
 
 	var flags flag.FlagSet
@@ -72,6 +74,10 @@ func main() {
 	flags.StringVar(&extractEPD, "extract-epd", "", "pgn file name")
 	flags.IntVar(&extractEPDPlies, "extract-epd-plies", 0, "number of plies to extract")
 	flags.StringVar(&epdToYAMLBook, "epd-to-yamlbook", "", "EPD file name to convert (new file will be <file>.yamlbook)")
+
+	flags.StringVar(&bustedPGNFile, "busted-pgn", "", "find busted lines in a PGN file")
+	flags.StringVar(&bustedPlayer, "busted-player", "", "player name")
+	flags.StringVar(&bustedColor, "busted-color", "", "white or black")
 
 	if err := flags.Parse(os.Args[1:]); err != nil {
 		if err == flag.ErrHelp {
@@ -101,6 +107,16 @@ func main() {
 		}
 		return
 	}
+
+	if bustedPlayer != "" && bustedPGNFile != "" && bustedColor != "" {
+		var color fen.Color
+		if bustedColor == "white" || bustedColor == "w" {
+			color = fen.WhitePieces
+		} else if bustedColor == "black" || bustedColor == "b" {
+			color = fen.BlackPieces
+		}
+
+		if _, err := Busted(bustedPGNFile, color); err != nil {
 			log.Fatal(err)
 		}
 		return
