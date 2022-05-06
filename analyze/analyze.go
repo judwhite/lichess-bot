@@ -330,8 +330,6 @@ func (a *Analyzer) AnalyzePosition(ctx context.Context, opts AnalysisOptions, fe
 	var searchMoves []string
 	var evals Evals
 
-	logInfo(fmt.Sprintf("start fen '%s' min_depth=%d", fenPos, opts.MinDepth))
-
 	evals, err = a.analyzePosition(ctx, opts, fenPos, moves)
 	if err != nil {
 		return nil, fmt.Errorf("searchmoves '%v': %v", searchMoves, err)

@@ -130,16 +130,16 @@ loop:
 				}
 
 				bestMove := moves[0]
-				san := board.UCItoSAN(bestMove.UCIMove)
 
-				t := fmt.Sprintf("t=%5v/%v", time.Since(start).Round(time.Second), opts.MaxTime)
 				if delta >= opts.DepthDelta {
-					logInfo(fmt.Sprintf("%s delta %d >= %d @ depth %d. move: %7s %s cp: %d mate: %d multipv: %d", t, delta, opts.DepthDelta, bestMove.Depth, san, bestMove.UCIMove, bestMove.CP, bestMove.Mate, bestMove.MultiPV))
+					logInfo(fmt.Sprintf("depth_delta: *** %s", bestMove.AsLog(fenPos)))
 					ignoreDepthsGreaterThan = bestMove.Depth
 					a.input <- "stop"
 				} else {
-					logInfo(fmt.Sprintf("%s delta %d < %d  @ depth %d. move: %7s %s cp: %d mate: %d multipv: %d", t, delta, opts.DepthDelta, bestMove.Depth, san, bestMove.UCIMove, bestMove.CP, bestMove.Mate, bestMove.MultiPV))
+					logInfo(fmt.Sprintf("depth_delta: %d<%d %s", delta, opts.DepthDelta, bestMove.AsLog(fenPos)))
 				}
+				logInfo(fmt.Sprintf("time: %v / %v", time.Since(start).Round(time.Second), opts.MaxTime))
+				logInfo("")
 			}
 
 		case <-timeout.C:

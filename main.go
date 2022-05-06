@@ -462,7 +462,6 @@ func UpdateFile(ctx context.Context, filename string, opts analyze.AnalysisOptio
 	pieceCountToPosCount := make(map[int]int)
 	for i := 0; i < len(fens); i++ {
 		b := fen.FENtoBoard(fens[i])
-		fens[i] = b.FENKey()
 
 		pc := b.PieceCount()
 		pieceCountToPosCount[pc] += 1
@@ -476,21 +475,25 @@ func UpdateFile(ctx context.Context, filename string, opts analyze.AnalysisOptio
 	}
 
 	for i := 0; i < len(fens); i++ {
+		start := time.Now()
 		boardFEN := fens[i]
-		fmt.Printf("%s piece_count: %d\n", boardFEN, fen.FENtoBoard(boardFEN).PieceCount())
+		fmt.Printf("%s FEN: %s  piece_count: %d\n%s\n", ts(), boardFEN, fen.FENtoBoard(boardFEN).PieceCount(), ts())
 
-		evals, err := a.AnalyzePosition(ctx, opts, boardFEN)
+		fenKey := fen.Key(boardFEN)
+		evals, err := a.AnalyzePosition(ctx, opts, fenKey)
 		if err != nil {
 			return err
 		}
 
-		if err := a.SaveEvalsToBook(file, boardFEN, evals); err != nil {
+		if err := a.SaveEvalsToBook(file, fenKey, evals); err != nil {
 			return err
 		}
 
 		if err := ctx.Err(); err != nil {
 			return err
 		}
+
+		fmt.Printf("%s\n%s FEN: %s complete in %v\n%s -----\n%s\n", ts(), ts(), boardFEN, time.Since(start).Round(time.Second), ts(), ts())
 	}
 
 	cancel()
