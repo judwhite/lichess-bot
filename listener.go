@@ -252,7 +252,7 @@ func (l *Listener) QueueChallenge(c api.Challenge) error {
 	}
 
 	if l.onlyUser != "" {
-		if strings.EqualFold(c.Challenger.Name, l.onlyUser) || strings.EqualFold(c.Challenger.Name, "bantercode") {
+		if !strings.EqualFold(c.Challenger.Name, l.onlyUser) && !strings.EqualFold(c.Challenger.Name, "bantercode") {
 			if err := api.DeclineChallenge(c.ID, "later"); err != nil {
 				return err
 			}
