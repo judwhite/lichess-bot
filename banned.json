@@ -167,6 +167,10 @@
     {
       "id": "bot-variants",
       "reason": "I'm not accepting challenges from bots."
+    },
+    {
+      "id": "dranzer1",
+      "reason": "I'm not accepting challenges from bots."
     }
   ]
 }
