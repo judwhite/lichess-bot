@@ -138,7 +138,17 @@ func LoadBook(filename string) (*Book, error) {
 		}
 
 		if n != 32 {
-			panic(fmt.Sprintf("n=%d, want 32. need to do something about short reads", n))
+			offset := n
+			n, err := r.Read(buf[offset:])
+			if err == io.EOF {
+				break
+			} else if err != nil {
+				return nil, err
+			}
+
+			if n+offset != 32 {
+				panic(fmt.Sprintf("n+offset=%d, want 32. need to do something about short reads", n+offset))
+			}
 		}
 
 		key := (uint64(buf[0]) << (7 * 8)) +
