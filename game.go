@@ -12,6 +12,7 @@ import (
 
 	"trollfish-lichess/api"
 	"trollfish-lichess/fen"
+	"trollfish-lichess/polyglot"
 	"trollfish-lichess/yamlbook"
 )
 
@@ -40,6 +41,8 @@ type Game struct {
 	humanEval       string
 	lastStateEvent  time.Time
 	aboutToMate     bool
+
+	books []*polyglot.Book
 
 	consecutiveFullMovesWithZeroEval int
 
@@ -233,6 +236,29 @@ func (g *Game) handleGameFull(ndjson []byte) {
 		timeControl,
 	)
 
+	book1, err := polyglot.LoadBook("gm2600.bin")
+	if err != nil {
+		panic(err)
+	}
+	book2, err := polyglot.LoadBook("Elo2400.bin")
+	if err != nil {
+		panic(err)
+	}
+	book3, err := polyglot.LoadBook("Performance.bin")
+	if err != nil {
+		panic(err)
+	}
+	book4, err := polyglot.LoadBook("varied.bin")
+	if err != nil {
+		panic(err)
+	}
+	book5, err := polyglot.LoadBook("Cerebellum3Merge.bin")
+	if err != nil {
+		panic(err)
+	}
+
+	g.books = append(g.books, book1, book2, book3, book4, book5)
+
 	g.waitReady()
 
 	if game.Rated {
@@ -384,6 +410,7 @@ func (g *Game) playMove(ndjson []byte, state api.State) {
 		}
 	}
 
+	// check yaml book
 	if board.FEN() != startPosFEN && bookMoveUCI == "" {
 		var bookMove *yamlbook.Move
 		bookMove, bookPonderUCI = g.book.BestMove(fenKey)
@@ -392,6 +419,18 @@ func (g *Game) playMove(ndjson []byte, state api.State) {
 			bookMoveCP, bookMoveMate = bookMove.CP, bookMove.Mate
 		}
 	}
+
+	// check polyglot books
+	if board.FEN() != startPosFEN && bookMoveUCI == "" {
+		for bookIndex, book := range g.books {
+			bookMoveUCI, _ = book.BestMove(fenKey)
+			if bookMoveUCI != "" {
+				fmt.Printf("%s polyglot book %d: move %s\n", ts(), bookIndex+1, bookMoveUCI)
+				break
+			}
+		}
+	}
+
 	_, repetition := g.seenPos[fenKey]
 	g.seenPos[fenKey] += 1
 	if repetition {
