@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math/rand"
 	"os"
 
 	"trollfish-lichess/fen"
@@ -30,6 +31,16 @@ func NewBook() *Book {
 	return &Book{
 		book: make(map[string][]*BookEntry),
 	}
+}
+
+func (b *Book) BestMove(fenKey string) (string, bool) {
+	bes, ok := b.Get(fenKey)
+	if !ok {
+		return "", false
+	}
+
+	n := rand.Intn(len(bes))
+	return bes[n].UCIMove, true
 }
 
 func (b *Book) Get(fenKey string) ([]*BookEntry, bool) {
