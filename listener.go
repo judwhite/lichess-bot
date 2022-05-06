@@ -24,7 +24,10 @@ const botID = "trollololfish"
 const startPosFEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
 
 const maxRating = 4000
-const minRating = 2400
+const minRating = 2500
+
+//const maxRating = 2300
+//const minRating = 1800
 
 type Listener struct {
 	ctx context.Context
