@@ -31,6 +31,7 @@ var defaultAnalysisOptions = analyze.AnalysisOptions{
 	MaxTime:    30 * time.Minute,
 	DepthDelta: 3,
 	MultiPV:    3,
+	MinNodes:   3_600_000_000,
 }
 
 func main() {

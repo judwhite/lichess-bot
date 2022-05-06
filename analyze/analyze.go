@@ -20,7 +20,8 @@ const SyzygyPath = "/home/jud/projects/tablebases/3-4-5:/home/jud/projects/table
 
 const startPosFEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
 const threads = 26
-const hashMemory = 40960 * 2
+const hashMemory = 49152 // aim for 70% hashfull // 40960 * 2
+const maxNodesMultiplier = 2
 
 // TODO: put in config
 const stockfishBinary = "/home/jud/projects/trollfish/stockfish/stockfish"
@@ -33,6 +34,7 @@ type AnalysisOptions struct {
 	MaxTime    time.Duration
 	DepthDelta int
 	MultiPV    int
+	MinNodes   int
 }
 
 // const Engine_Stockfish_15_NN_6e0680e = 1
@@ -353,12 +355,13 @@ func (a *Analyzer) analyzePosition(ctx context.Context, opts AnalysisOptions, fe
 		return nil, fmt.Errorf("TODO: position '%s' is already game over", fenPos)
 	}
 
+	maxNodes := int(float64(opts.MinNodes) * maxNodesMultiplier)
 	if len(moves) != 0 {
 		a.input <- fmt.Sprintf("setoption name MultiPV value %d", len(moves))
-		a.input <- fmt.Sprintf("go depth %d movetime %d searchmoves %s", opts.MaxDepth, opts.MaxTime.Milliseconds(), strings.Join(moves, " "))
+		a.input <- fmt.Sprintf("go depth %d nodes %d movetime %d searchmoves %s", opts.MaxDepth, maxNodes, opts.MaxTime.Milliseconds(), strings.Join(moves, " "))
 	} else {
 		a.input <- fmt.Sprintf("setoption name MultiPV value %d", opts.MultiPV)
-		a.input <- fmt.Sprintf("go depth %d movetime %d", opts.MaxDepth, opts.MaxTime.Milliseconds())
+		a.input <- fmt.Sprintf("go depth %d nodes %d movetime %d", opts.MaxDepth, maxNodes, opts.MaxTime.Milliseconds())
 	}
 
 	evals := a.engineEvals(ctx, opts, fenPos)

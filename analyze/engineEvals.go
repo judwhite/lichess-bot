@@ -107,7 +107,7 @@ loop:
 			}
 
 			// see if we've crossed the min-depth threshold
-			if depthComplete && eval.Depth == maxDepth && eval.Depth >= opts.MinDepth && eval.Time >= minTimeMS && len(moves) > 0 {
+			if depthComplete && eval.Depth == maxDepth && eval.Depth >= opts.MinDepth && eval.Time >= minTimeMS && eval.Nodes >= opts.MinNodes && len(moves) > 0 {
 				delta := 0
 				move := moves[0].UCIMove
 
