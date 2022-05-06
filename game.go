@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -38,6 +39,7 @@ type Game struct {
 	totalPonders    int
 	humanEval       string
 	lastStateEvent  time.Time
+	aboutToMate     bool
 
 	consecutiveFullMovesWithZeroEval int
 
@@ -107,28 +109,11 @@ func (g *Game) Finish() {
 	g.stopPondering()
 	g.finished = true
 
-	fp, err := os.OpenFile("recent.epd", os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer func() {
-		_ = fp.Sync()
-		_ = fp.Close()
-	}()
+	g.saveToRecent()
 
 	var sb strings.Builder
-	for i, move := range g.moves {
+	for _, move := range g.moves {
 		b := fen.FENtoBoard(move.FEN)
-
-		ourMove := i%2 == g.playerNumber
-		_, found := g.book.GetAll(move.FEN)
-		if !found && ourMove && b.FullMove <= 15 {
-			_, err = fmt.Fprintf(fp, "- fen: %s\n", fen.Key(move.FEN))
-			if err != nil {
-				log.Fatal(err)
-			}
-		}
-
 		if b.ActiveColor == fen.WhitePieces {
 			sb.WriteByte('\n')
 			sb.WriteString(fmt.Sprintf("%3d. %7s", b.FullMove, move.MoveSAN))
@@ -142,6 +127,30 @@ func (g *Game) Finish() {
 	sb.WriteString(fmt.Sprintf("%d/%d predictions played\n", g.ponderHits, g.totalPonders))
 
 	fmt.Print(sb.String())
+}
+
+func (g *Game) saveToRecent() {
+	fp, err := os.OpenFile("recent.epd", os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer func() {
+		_ = fp.Sync()
+		_ = fp.Close()
+	}()
+
+	for i, move := range g.moves {
+		b := fen.FENtoBoard(move.FEN)
+
+		ourMove := i%2 == g.playerNumber
+		_, found := g.book.GetAll(move.FEN)
+		if !found && ourMove && b.FullMove <= 25 {
+			_, err = fmt.Fprintf(fp, "- fen: %s\n", fen.Key(move.FEN))
+			if err != nil {
+				log.Fatal(err)
+			}
+		}
+	}
 }
 
 func (g *Game) handleChat(ndjson []byte) {
@@ -451,6 +460,25 @@ func (g *Game) playMove(ndjson []byte, state api.State) {
 						} else {
 							g.consecutiveFullMovesWithZeroEval = 0
 						}
+
+						g.aboutToMate = false
+
+						if strings.HasPrefix(g.humanEval, "M") {
+							mateText := g.humanEval[1:]
+							mate, _ := strconv.Atoi(mateText)
+							if g.playerNumber == 0 && mate > 0 {
+								g.aboutToMate = true
+							} else if g.playerNumber == 1 && mate < 0 {
+								g.aboutToMate = true
+							}
+						} else {
+							cp, _ := strconv.ParseFloat(g.humanEval, 64)
+							if g.playerNumber == 0 && cp >= 150 {
+								g.aboutToMate = true
+							} else if g.playerNumber == 1 && cp <= -150 {
+								g.aboutToMate = true
+							}
+						}
 					}
 				}
 				break
@@ -473,6 +501,18 @@ func (g *Game) playMove(ndjson []byte, state api.State) {
 
 	if g.IsFinished() {
 		return
+	}
+
+	if ourTime > opponentTime && opponentTime < 1*time.Second && g.aboutToMate {
+		go func() {
+			give := int(ourTime-opponentTime) / 2 / 1e9
+			if give > 0 {
+				fmt.Printf("%s giving opponent %d second(s)\n", ts(), give)
+				if err := api.AddTime(g.gameID, give); err != nil {
+					log.Printf("AddTime: %v\n", err)
+				}
+			}
+		}()
 	}
 
 	if err := g.sendMoveToServer(bestMove, offerDraw); err != nil {
