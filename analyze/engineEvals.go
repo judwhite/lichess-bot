@@ -27,6 +27,9 @@ func (a *Analyzer) engineEvals(ctx context.Context, opts AnalysisOptions, fenPos
 	timeout := time.NewTimer(opts.MaxTime)
 	minNodes := 0
 
+	board := fen.FENtoBoard(fenPos)
+	numberOfMoves := min(opts.MultiPV, len(board.AllLegalMoves()))
+
 loop:
 	for {
 		select {
@@ -98,7 +101,7 @@ loop:
 					maxDepthMultiPVCount++
 				}
 			}
-			depthComplete := maxDepthMultiPVCount == opts.MultiPV
+			depthComplete := maxDepthMultiPVCount == numberOfMoves
 			if depthComplete {
 				logInfo("") // blank line
 			}
@@ -126,7 +129,6 @@ loop:
 					}
 				}
 
-				board := fen.FENtoBoard(fenPos)
 				bestMove := moves[0]
 				san := board.UCItoSAN(bestMove.UCIMove)
 

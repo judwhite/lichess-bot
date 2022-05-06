@@ -57,7 +57,7 @@ func (e Eval) AsLog(fenPos string) string {
 	b := fen.FENtoBoard(fenPos)
 
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("info depth %2d seldepth %2d multipv %2d score ", e.Depth, e.SelDepth, e.MultiPV))
+	sb.WriteString(fmt.Sprintf("info depth %3d seldepth %3d multipv %3d score ", e.Depth, e.SelDepth, e.MultiPV))
 	if e.Mate == 0 {
 		sb.WriteString(fmt.Sprintf("cp   %6d ", e.CP))
 	} else {
