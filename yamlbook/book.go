@@ -477,20 +477,55 @@ func (b *Book) BestMove(fenPos string) (*Move, string) {
 
 	// TODO: add variance by weight
 	bestMove = moves[0]
-	i := 1
-	for ; i < len(moves); i++ {
-		if moves[i].CP != bestMove.CP || moves[i].Mate != bestMove.Mate {
-			break
+
+	if bestMove.Weight == 0 {
+		i := 1
+		text := bestMove.Move
+		for ; i < len(moves); i++ {
+			if moves[i].CP != bestMove.CP || moves[i].Mate != bestMove.Mate {
+				break
+			}
+			text += ", " + moves[i].Move
 		}
-	}
-	if i > 1 {
-		n := rand.Intn(i)
-		bestMove = moves[n]
-		fmt.Printf("moves[0]: %s %d moves[n]: %s %d pick %s\n", moves[0].Move, moves[0].CP, moves[n].Move, moves[n].CP, bestMove.Move)
+		if i > 1 {
+			n := rand.Intn(i)
+			bestMove = moves[n]
+			fmt.Printf("moves: '%s' count: %d pick: '%s' eval: %d\n", text, i+1, bestMove.Move, bestMove.CP)
+		}
+	} else {
+		type weightedMove struct {
+			start int
+			end   int
+			index int
+		}
+		var deck []weightedMove
+
+		sum := 0
+		for i := 0; i < len(moves); i++ {
+			if moves[i].Weight <= 0 {
+				break
+			}
+
+			start := sum
+
+			sum += moves[i].Weight
+			end := sum - 1
+
+			deck = append(deck, weightedMove{start: start, end: end, index: i})
+		}
+
+		num := rand.Intn(sum)
+		for _, card := range deck {
+			if card.start <= num && card.end >= num {
+				bestMove = moves[card.index]
+				fmt.Printf("weighted choice. choices: %d sum: %d num: %d<=%d<=%d pick: %s cp: %d\n",
+					len(deck), sum, card.start, num, card.end, bestMove.Move, bestMove.CP)
+				break
+			}
+		}
 	}
 
 	bestMove.fen = fenKey
-	bestMove.UCI()
 
 	line := bestMove.GetLastLogLineFor(bestMove.Move)
 	pvSANs := strings.Split(line.PV, " ")
