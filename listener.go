@@ -124,7 +124,9 @@ func New(ctx context.Context, input chan<- string, output <-chan string, onlyUse
 	}
 
 	if challenge != "" {
-		l.challenge(challenge, false, tc.Limit, tc.Increment, "random")
+		go func() {
+			l.challenge(challenge, true, tc.Limit, tc.Increment, "random")
+		}()
 	}
 
 	return &l
