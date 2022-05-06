@@ -271,6 +271,9 @@ func (g *Game) handleGameFull(ndjson []byte) {
 		g.input <- "setoption name StartAgro value true"
 	} else {
 		g.input <- "setoption name StartAgro value false"
+		if err := api.AddTime(g.gameID, 300+180); err != nil {
+			log.Printf("AddTime: %v\n", err)
+		}
 	}
 
 	g.input <- "ucinewgame"
