@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"log"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -1131,6 +1132,65 @@ func (b Board) pathMoves(idx int, paths []nav) []int {
 	}
 
 	return moves
+}
+
+func (b Board) PieceCount() int {
+	var count int
+	for _, c := range b.Pos {
+		if c != ' ' {
+			count++
+		}
+	}
+	return count
+}
+
+type SyzygyPieces []byte
+
+func (s SyzygyPieces) Less(i, j int) bool {
+	if s[i] == s[j] {
+		return false
+	}
+
+	order := []byte{'K', 'Q', 'R', 'B', 'N', 'P'}
+	for _, item := range order {
+		if s[i] == item {
+			return true
+		}
+		if s[j] == item {
+			return false
+		}
+	}
+
+	panic(fmt.Errorf("uknown pieces '%c' '%c'", s[i], s[j]))
+}
+
+func (s SyzygyPieces) Swap(i, j int) {
+	s[i], s[j] = s[j], s[i]
+}
+
+func (s SyzygyPieces) Len() int {
+	return len(s)
+}
+
+func (b Board) SyzygyTableName() string {
+	var white SyzygyPieces
+	var black SyzygyPieces
+	for _, c := range b.Pos {
+		if c == ' ' {
+			continue
+		}
+		if isUpper(c) {
+			white = append(white, c)
+		} else {
+			black = append(black, upper(c))
+		}
+	}
+	sort.Sort(white)
+	sort.Sort(black)
+	if len(white) > len(black) {
+		return fmt.Sprintf("%sv%s", string(white), string(black))
+	}
+	return fmt.Sprintf("%sv%s", string(black), string(white))
 }
 
 func isLower(b byte) bool {

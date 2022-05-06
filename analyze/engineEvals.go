@@ -48,6 +48,13 @@ loop:
 				continue
 			}
 
+			logInfo(eval.AsLog(fenPos))
+
+			// annoying (but probably useful to UI) update of old depth
+			if eval.Depth < maxDepth {
+				continue
+			}
+
 			minNodes = eval.Nodes
 			if eval.Depth > maxDepth {
 				if printEngineOutput {
@@ -85,42 +92,51 @@ loop:
 				return moves[i].Time > moves[j].Time
 			})
 
-			depth1Count, depth2Count := 0, 0
+			var maxDepthMultiPVCount int
 			for i := 0; i < len(moves); i++ {
-				if moves[i].Depth == maxDepth {
-					depth1Count++
-				}
-				if moves[i].Depth == maxDepth-1 {
-					depth2Count++
+				if moves[i].Depth == maxDepth && moves[i].Nodes == minNodes {
+					maxDepthMultiPVCount++
 				}
 			}
-			depthComplete := depth1Count == depth2Count
+			depthComplete := maxDepthMultiPVCount == opts.MultiPV
+			if depthComplete {
+				logInfo("") // blank line
+			}
 
 			// see if we've crossed the min-depth threshold
-			if depthComplete && eval.Depth >= opts.MinDepth && eval.Time >= minTimeMS && len(moves) > 0 {
-				delta := 1
+			if depthComplete && eval.Depth == maxDepth && eval.Depth >= opts.MinDepth && eval.Time >= minTimeMS && len(moves) > 0 {
+				delta := 0
 				move := moves[0].UCIMove
-				for i := 1; i < len(moves); i++ {
-					if moves[i].MultiPV != 1 || moves[i].Depth < floorDepth {
-						continue
-					}
-					if moves[i].UCIMove == move {
-						delta++
-					} else {
-						break
+
+				curDepth := maxDepth
+				for i := 0; i < len(moves); i++ {
+					if moves[i].MultiPV == 1 && moves[i].Depth == curDepth && moves[i].Depth >= floorDepth {
+						if moves[i].UCIMove == move {
+							delta++
+							curDepth--
+							logInfo(fmt.Sprintf("depth_delta: %d/%d %s", delta, opts.DepthDelta, moves[i].AsLog(fenPos)))
+						} else {
+							logInfo(fmt.Sprintf("depth_delta: --- %s", moves[i].AsLog(fenPos)))
+							break
+						}
+
+						if opts.DepthDelta == delta {
+							break
+						}
 					}
 				}
 
 				board := fen.FENtoBoard(fenPos)
-				san := board.UCItoSAN(eval.UCIMove)
+				bestMove := moves[0]
+				san := board.UCItoSAN(bestMove.UCIMove)
 
 				t := fmt.Sprintf("t=%5v/%v", time.Since(start).Round(time.Second), opts.MaxTime)
 				if delta >= opts.DepthDelta {
-					logInfo(fmt.Sprintf("%s delta %d >= %d @ depth %d. move: %7s %s cp: %d mate: %d", t, delta, opts.DepthDelta, eval.Depth, san, eval.UCIMove, eval.CP, eval.Mate))
-					ignoreDepthsGreaterThan = eval.Depth
+					logInfo(fmt.Sprintf("%s delta %d >= %d @ depth %d. move: %7s %s cp: %d mate: %d multipv: %d", t, delta, opts.DepthDelta, bestMove.Depth, san, bestMove.UCIMove, bestMove.CP, bestMove.Mate, bestMove.MultiPV))
+					ignoreDepthsGreaterThan = bestMove.Depth
 					a.input <- "stop"
 				} else {
-					logInfo(fmt.Sprintf("%s delta %d < %d  @ depth %d. move: %7s %s cp: %d mate: %d", t, delta, opts.DepthDelta, eval.Depth, san, eval.UCIMove, eval.CP, eval.Mate))
+					logInfo(fmt.Sprintf("%s delta %d < %d  @ depth %d. move: %7s %s cp: %d mate: %d multipv: %d", t, delta, opts.DepthDelta, bestMove.Depth, san, bestMove.UCIMove, bestMove.CP, bestMove.Mate, bestMove.MultiPV))
 				}
 			}
 

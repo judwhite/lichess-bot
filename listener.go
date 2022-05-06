@@ -185,7 +185,7 @@ func (l *Listener) Events() error {
 			l.activeGameMtx.Lock()
 			if l.activeGame != nil {
 				// TODO: abort game
-				if !l.activeGame.finished {
+				if !l.activeGame.IsFinished() {
 					fmt.Printf("%s ??? You're already playing a game. Abort one!\n", ts())
 					l.activeGameMtx.Unlock()
 					return true

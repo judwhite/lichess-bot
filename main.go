@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"math/rand"
 	"os"
@@ -15,7 +16,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"unicode"
 
 	"trollfish-lichess/analyze"
 	"trollfish-lichess/api"
@@ -30,6 +30,7 @@ var defaultAnalysisOptions = analyze.AnalysisOptions{
 	MinTime:    60 * time.Second,
 	MaxTime:    30 * time.Minute,
 	DepthDelta: 3,
+	MultiPV:    3,
 }
 
 func main() {
@@ -38,6 +39,7 @@ func main() {
 	var (
 		botFlag              bool
 		updateBookFilename   string
+		updateBookFEN        string
 		dedupeEPDFilename    string
 		freqPGNFilename      string
 		freqMergeEPDFilename string
@@ -61,6 +63,7 @@ func main() {
 	flags.BoolVar(&botFlag, "bot", false, "runs the bot")
 	flags.StringVar(&tc, "tc", "1+1", "time control minutes+secs")
 	flags.StringVar(&updateBookFilename, "update-book", "", "run analysis and update a book")
+	flags.StringVar(&updateBookFEN, "fen", "", "run analysis and update a book on a specific FEN")
 	flags.StringVar(&dedupeEPDFilename, "dedupe-epd", "", "show duplicates in EPD file")
 	flags.StringVar(&freqPGNFilename, "freq-pgn", "", "show most common positions from a PGN file in EPD format (see also freq-count)")
 	flags.StringVar(&freqMergeEPDFilename, "freq-merge-epd", "", "merge positions with an EPD file. only new positions are added.")
@@ -102,7 +105,25 @@ func main() {
 	}
 
 	if updateBookFilename != "" {
-		if err := UpdateFile(context.Background(), updateBookFilename, defaultAnalysisOptions); err != nil {
+		var fens []string
+		if updateBookFEN != "" {
+			if strings.Contains(updateBookFEN, "/") && strings.Contains(updateBookFEN, " ") {
+				fens = append(fens, updateBookFEN)
+			} else {
+				b, err := ioutil.ReadFile(updateBookFEN)
+				if err != nil {
+					log.Fatal(err)
+				}
+				lines := strings.Split(string(b), "\n")
+				for _, line := range lines {
+					line = strings.TrimSpace(line)
+					if line != "" && !strings.HasPrefix(line, "#") {
+						fens = append(fens, line)
+					}
+				}
+			}
+		}
+		if err := UpdateFile(context.Background(), updateBookFilename, defaultAnalysisOptions, fens); err != nil {
 			log.Fatal(err)
 		}
 		return
@@ -416,7 +437,7 @@ func ts() string {
 	return fmt.Sprintf("[%s]", time.Now().Format("2006-01-02 15:04:05.000"))
 }
 
-func UpdateFile(ctx context.Context, filename string, opts analyze.AnalysisOptions) error {
+func UpdateFile(ctx context.Context, filename string, opts analyze.AnalysisOptions, fens []string) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -432,30 +453,17 @@ func UpdateFile(ctx context.Context, filename string, opts analyze.AnalysisOptio
 		return err
 	}
 
-	fens := file.NeedMoves()
-
-	pieceCount := func(s string) int {
-		var count int
-		for _, c := range s {
-			if unicode.IsDigit(c) || c == '/' {
-				continue
-			}
-			if c == ' ' {
-				break
-			}
-			count++
-		}
-		return count
+	if len(fens) == 0 {
+		fens = file.NeedMoves()
 	}
-
-	sort.Slice(fens, func(i, j int) bool {
-		return pieceCount(fens[i]) > pieceCount(fens[j])
-	})
 
 	fmt.Printf("%d positions to analyze\n", len(fens))
 	pieceCountToPosCount := make(map[int]int)
 	for i := 0; i < len(fens); i++ {
-		pc := pieceCount(fens[i])
+		b := fen.FENtoBoard(fens[i])
+		fens[i] = b.FENKey()
+
+		pc := b.PieceCount()
 		pieceCountToPosCount[pc] += 1
 	}
 	for i := 32; i >= 0; i-- {
@@ -468,7 +476,7 @@ func UpdateFile(ctx context.Context, filename string, opts analyze.AnalysisOptio
 
 	for i := 0; i < len(fens); i++ {
 		boardFEN := fens[i]
-		fmt.Printf("%s piece_count: %d\n", boardFEN, pieceCount(boardFEN))
+		fmt.Printf("%s piece_count: %d\n", boardFEN, fen.FENtoBoard(boardFEN).PieceCount())
 
 		evals, err := a.AnalyzePosition(ctx, opts, boardFEN)
 		if err != nil {
@@ -491,4 +499,27 @@ func UpdateFile(ctx context.Context, filename string, opts analyze.AnalysisOptio
 	}
 
 	return nil
+}
+
+func order(m map[string]int) []string {
+	type asdf struct {
+		key   string
+		value int
+	}
+
+	list1 := make([]asdf, 0, len(m))
+	for k, v := range m {
+		list1 = append(list1, asdf{key: k, value: v})
+	}
+
+	sort.Slice(list1, func(i, j int) bool {
+		return list1[i].value > list1[j].value
+	})
+
+	list2 := make([]string, 0, len(list1))
+	for _, item := range list1 {
+		list2 = append(list2, item.key)
+	}
+
+	return list2
 }

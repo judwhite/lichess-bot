@@ -137,20 +137,36 @@
       "reason": "I'm not accepting challenges from bots."
     },
     {
-      "id": "requinbot",
-      "reason": "I'm not accepting challenges with this time control."
-    },
-    {
-      "id": "lynx_bot",
-      "reason": "I'm not accepting challenges with this time control."
-    },
-    {
       "id": "anarchychess-bot",
       "reason": "bongcloud"
     },
     {
       "id": "HikaruNakamuraBot",
       "reason": "bongcloud"
+    },
+    {
+      "id": "sargon-2ply",
+      "reason": "I'm not accepting challenges from bots."
+    },
+    {
+      "id": "turochamp-1ply",
+      "reason": "I'm not accepting challenges from bots."
+    },
+    {
+      "id": "sargon-1ply",
+      "reason": "I'm not accepting challenges from bots."
+    },
+    {
+      "id": "botyuliirma",
+      "reason": "I'm not accepting challenges from bots."
+    },
+    {
+      "id": "sargon-4ply",
+      "reason": "I'm not accepting challenges from bots."
+    },
+    {
+      "id": "bot-variants",
+      "reason": "I'm not accepting challenges from bots."
     }
   ]
 }

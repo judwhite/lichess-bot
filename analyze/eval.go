@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"time"
 
+	"trollfish-lichess/commas"
 	"trollfish-lichess/fen"
 )
 
@@ -19,6 +21,7 @@ type Eval struct {
 	Mate       int      `json:"mate"`
 	Nodes      int      `json:"nodes"`
 	NPS        int      `json:"nps"`
+	HashFull   int      `json:"hashfull"`
 	TBHits     int      `json:"tbhits"`
 	Time       int      `json:"time"`
 	UpperBound bool     `json:"ub,omitempty"`
@@ -48,6 +51,37 @@ func (e Eval) GlobalCP(color fen.Color) int {
 
 func (e Eval) GlobalMate(color fen.Color) int {
 	return e.Mate * int(color)
+}
+
+func (e Eval) AsLog(fenPos string) string {
+	b := fen.FENtoBoard(fenPos)
+
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("info depth %2d seldepth %2d multipv %2d score ", e.Depth, e.SelDepth, e.MultiPV))
+	if e.Mate == 0 {
+		sb.WriteString(fmt.Sprintf("cp   %6d ", e.CP))
+	} else {
+		sb.WriteString(fmt.Sprintf("mate %6d ", e.Mate))
+	}
+	t := time.Duration(e.Time) * time.Millisecond
+	if t >= 5*time.Second {
+		t = t.Round(time.Second)
+	} else if t >= 1*time.Second {
+		t = t.Round(100 * time.Millisecond)
+	}
+	sb.WriteString(fmt.Sprintf(" nodes %14s  nps %10s  hashfull %5.1f%%  tbhits %10s  time %7v  pv ", commas.Int(e.Nodes), commas.Int(e.NPS), float64(e.HashFull)/10, commas.Int(e.TBHits), t))
+	sb.WriteString(fmt.Sprintf("%6s", b.UCItoSAN(e.PV[0])))
+	maxMoves := min(9, len(e.PV))
+	for i := 1; i < maxMoves; i++ {
+		b.Moves(e.PV[i-1])
+		sb.WriteString(fmt.Sprintf(" %6s", b.UCItoSAN(e.PV[i])))
+
+		if i == maxMoves-1 && len(e.PV) > maxMoves {
+			sb.WriteString(" ...")
+		}
+	}
+
+	return sb.String()
 }
 
 func (e Eval) String(color fen.Color) string {
@@ -106,12 +140,12 @@ scoreLoop:
 			eval.Nodes = atoi(parts[i+1])
 		case "nps":
 			eval.NPS = atoi(parts[i+1])
+		case "hashfull":
+			eval.HashFull = atoi(parts[i+1])
 		case "tbhits":
 			eval.TBHits = atoi(parts[i+1])
 		case "time":
 			eval.Time = atoi(parts[i+1])
-		case "hashfull":
-			// ignore
 		case "pv":
 			pvMoves := parts[i+1:]
 			eval.PV = pvMoves
@@ -125,4 +159,11 @@ scoreLoop:
 	}
 
 	return eval
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }

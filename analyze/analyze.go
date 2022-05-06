@@ -32,6 +32,7 @@ type AnalysisOptions struct {
 	MinTime    time.Duration
 	MaxTime    time.Duration
 	DepthDelta int
+	MultiPV    int
 }
 
 // const Engine_Stockfish_15_NN_6e0680e = 1
@@ -356,7 +357,7 @@ func (a *Analyzer) analyzePosition(ctx context.Context, opts AnalysisOptions, fe
 		a.input <- fmt.Sprintf("setoption name MultiPV value %d", len(moves))
 		a.input <- fmt.Sprintf("go depth %d movetime %d searchmoves %s", opts.MaxDepth, opts.MaxTime.Milliseconds(), strings.Join(moves, " "))
 	} else {
-		a.input <- fmt.Sprintf("setoption name MultiPV value 3")
+		a.input <- fmt.Sprintf("setoption name MultiPV value %d", opts.MultiPV)
 		a.input <- fmt.Sprintf("go depth %d movetime %d", opts.MaxDepth, opts.MaxTime.Milliseconds())
 	}
 

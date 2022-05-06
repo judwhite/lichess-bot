@@ -274,6 +274,10 @@ func (g *Game) handleGameState(ndjson []byte) {
 		return
 	}
 
+	if state.Status != "started" {
+		fmt.Printf("%s state.Status: '%s'\n", ts(), state.Status)
+	}
+
 	g.playMove(ndjson, state)
 }
 
@@ -305,6 +309,10 @@ func (g *Game) playMove(ndjson []byte, state api.State) {
 		fmt.Printf("%s waiting for opponent...\n", ts())
 		return
 	}
+	if len(moves) > 0 && len(moves) == len(g.moves) {
+		fmt.Printf("%s *** Duplicate message??? %s\n", ts(), ndjson)
+		return
+	}
 
 	var ponderHit bool
 	var board fen.Board
@@ -334,7 +342,7 @@ func (g *Game) playMove(ndjson []byte, state api.State) {
 
 		board.Moves(moves...)
 
-		fmt.Printf("%s played: %s\n", ts(), playedSAN)
+		fmt.Printf("%s their move: %s\n", ts(), playedSAN)
 	}
 
 	g.ponder = ""
@@ -408,9 +416,9 @@ func (g *Game) playMove(ndjson []byte, state api.State) {
 
 			var pos string
 			if state.Moves == "" {
-				pos = fmt.Sprintf("position fen %s", startPosFEN)
+				pos = fmt.Sprintf("position startpos")
 			} else {
-				pos = fmt.Sprintf("position fen %s moves %s", startPosFEN, state.Moves)
+				pos = fmt.Sprintf("position startpos moves %s", state.Moves)
 			}
 
 			goCmd := fmt.Sprintf("go wtime %d winc %d btime %d binc %d",
@@ -425,6 +433,10 @@ func (g *Game) playMove(ndjson []byte, state api.State) {
 		fmt.Printf("%s thinking...\n", ts())
 
 		for item := range g.output {
+			if g.IsFinished() {
+				return
+			}
+
 			// bestmove and ponder
 			if strings.HasPrefix(item, "bestmove") {
 				p := strings.Split(item, " ")
@@ -451,12 +463,16 @@ func (g *Game) playMove(ndjson []byte, state api.State) {
 	gameIsEqual := g.consecutiveFullMovesWithZeroEval > 12 && board.FullMove > 40 && board.HalfmoveClock > 4
 	offerDraw := gameIsEqual && tcHasIncrement && !goForDirtyFlag
 
-	if tcHasIncrement && ourTime >= 3*time.Second {
+	if tcHasIncrement && ourTime >= 30*time.Second {
 		elapsed := time.Since(start)
 		delta := 400*time.Millisecond - elapsed
 		if delta > 0 {
 			time.Sleep(delta)
 		}
+	}
+
+	if g.IsFinished() {
+		return
 	}
 
 	if err := g.sendMoveToServer(bestMove, offerDraw); err != nil {
@@ -465,7 +481,6 @@ func (g *Game) playMove(ndjson []byte, state api.State) {
 		fmt.Printf("%s *** ERR: api.PlayMove: %v: %s\n", ts(), err, string(ndjson))
 
 		g.Finish()
-		fmt.Printf("%s g.Finish() returned", ts())
 		return
 	}
 
@@ -513,9 +528,9 @@ func (g *Game) ponderMove(ponderMoveUCI string, state api.State, playedMoveUCI s
 
 	var pos string
 	if state.Moves == "" {
-		pos = fmt.Sprintf("position fen %s moves %s %s", startPosFEN, playedMoveUCI, g.ponder)
+		pos = fmt.Sprintf("position startpos moves %s %s", playedMoveUCI, g.ponder)
 	} else {
-		pos = fmt.Sprintf("position fen %s moves %s %s %s", startPosFEN, state.Moves, playedMoveUCI, g.ponder)
+		pos = fmt.Sprintf("position startpos moves %s %s %s", state.Moves, playedMoveUCI, g.ponder)
 	}
 
 	var goCmd string
