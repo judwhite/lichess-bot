@@ -236,6 +236,13 @@ func (g *Game) handleGameFull(ndjson []byte) {
 		timeControl,
 	)
 
+	m, err := Busted(strings.ToLower(g.opponent.ID)+".pgn", iif(g.playerNumber == 0, fen.WhitePieces, fen.BlackPieces))
+	if err != nil {
+		fmt.Printf("%s %v\n", ts(), err)
+	} else {
+		g.playerBook = m
+	}
+
 	book1, err := polyglot.LoadBook("gm2600.bin")
 	if err != nil {
 		panic(err)
