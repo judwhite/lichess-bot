@@ -266,7 +266,11 @@ func (g *Game) handleGameFull(ndjson []byte) {
 		panic(err)
 	}
 
-	g.books = append(g.books, book1, book2, book3, book4, book5)
+	if g.opponent.Title != "BOT" {
+		g.books = append(g.books, book1, book2, book3, book4, book5)
+	} else {
+		g.books = append(g.books, book3, book4, book1)
+	}
 
 	g.waitReady()
 
