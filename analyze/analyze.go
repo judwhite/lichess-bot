@@ -16,10 +16,10 @@ import (
 const useFullResources = true
 const logEngineOutput = false
 
-const SyzygyPath = "/home/jud/projects/tablebases/3-4-5:/home/jud/projects/tablebases/wdl6:/home/jud/projects/tablebases/dtz6:/home/jud/projects/tablebases/7" // TODO: get path from config file
+const SyzygyPath = "/home/jud/projects/tablebases/3-4-5:/home/jud/projects/tablebases/wdl6:/home/jud/projects/tablebases/dtz6:/home/jud/projects/tablebases/7:/home/jud/projects/tablebases/dtz7" // TODO: get path from config file
 
 const startPosFEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
-const threads = 26
+const threads = 28
 const hashMemory = 49152 // aim for 70% hashfull // 40960 * 2
 const maxNodesMultiplier = 2
 
