@@ -238,7 +238,7 @@ func (g *Game) handleGameFull(ndjson []byte) {
 
 	m, err := Busted(strings.ToLower(g.opponent.ID)+".pgn", iif(g.playerNumber == 0, fen.WhitePieces, fen.BlackPieces))
 	if err != nil {
-		fmt.Printf("%s %v\n", ts(), err)
+		fmt.Printf("%s ?-?-?-?-? %v\n", ts(), err)
 	} else {
 		g.playerBook = m
 	}
@@ -435,7 +435,7 @@ func (g *Game) playMove(ndjson []byte, state api.State) {
 		for bookIndex, book := range g.books {
 			bookMoveUCI, _ = book.BestMove(fenKey)
 			if bookMoveUCI != "" {
-				fmt.Printf("%s polyglot book %d: move %s\n", ts(), bookIndex+1, bookMoveUCI)
+				fmt.Printf("%s !-!-!-!-!-! Polyglot book index %d: move %s\n", ts(), bookIndex, bookMoveUCI)
 				break
 			}
 		}

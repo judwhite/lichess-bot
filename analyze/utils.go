@@ -173,7 +173,9 @@ readyOKLoop:
 
 func (a *Analyzer) LogEngine(s string) {
 	if !a.logEngineOutput {
-		return
+		if !strings.Contains(s, "tablebases") && !strings.Contains(s, ".nnue") {
+			return
+		}
 	}
 
 	a.logEngineMtx.Lock()

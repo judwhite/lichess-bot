@@ -490,7 +490,7 @@ func (b *Book) BestMove(fenPos string) (*Move, string) {
 		if i > 1 {
 			n := rand.Intn(i)
 			bestMove = moves[n]
-			fmt.Printf("moves: '%s' count: %d pick: '%s' eval: %d\n", text, i+1, bestMove.Move, bestMove.CP)
+			fmt.Printf("moves: '%s' count: %d pick: '%s' eval: %d\n", text, i, bestMove.Move, bestMove.CP)
 		}
 	} else {
 		type weightedMove struct {
@@ -518,7 +518,7 @@ func (b *Book) BestMove(fenPos string) (*Move, string) {
 		for _, card := range deck {
 			if card.start <= num && card.end >= num {
 				bestMove = moves[card.index]
-				fmt.Printf("weighted choice. choices: %d sum: %d num: %d<=%d<=%d pick: %s cp: %d\n",
+				fmt.Printf("WEIGHTED CHOICE: choices: %d sum: %d num: %d<=%d<=%d pick: %s cp: %d\n",
 					len(deck), sum, card.start, num, card.end, bestMove.Move, bestMove.CP)
 				break
 			}
