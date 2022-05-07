@@ -270,7 +270,7 @@ func (g *Game) handleGameFull(ndjson []byte) {
 
 	g.waitReady()
 
-	if game.Rated {
+	if game.Rated || g.opponent.Title != "BOT" {
 		g.input <- "setoption name PlayBad value false"
 	} else {
 		g.input <- "setoption name PlayBad value true"
