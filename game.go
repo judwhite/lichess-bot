@@ -41,6 +41,7 @@ type Game struct {
 	humanEval       string
 	lastStateEvent  time.Time
 	aboutToMate     bool
+	canGiveTime     bool
 
 	books []*polyglot.Book
 
@@ -64,6 +65,7 @@ func NewGame(gameID string, input chan<- string, output <-chan string, book *yam
 		output:       output,
 		book:         book,
 		seenPos:      make(map[string]int),
+		canGiveTime:  true,
 	}
 }
 
@@ -552,12 +554,13 @@ func (g *Game) playMove(ndjson []byte, state api.State) {
 		return
 	}
 
-	if ourTime > opponentTime && opponentTime < 1*time.Second && g.aboutToMate {
+	if ourTime > opponentTime && opponentTime < 1*time.Second && g.aboutToMate && g.canGiveTime {
 		go func() {
 			give := int(ourTime-opponentTime) / 2 / 1e9
 			if give > 0 {
 				fmt.Printf("%s giving opponent %d second(s)\n", ts(), give)
 				if err := api.AddTime(g.gameID, give); err != nil {
+					g.canGiveTime = false
 					log.Printf("AddTime: %v\n", err)
 				}
 			}
