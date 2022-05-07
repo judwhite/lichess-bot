@@ -136,26 +136,13 @@ func (a *Analyzer) AnalyzeGame(ctx context.Context, opts AnalysisOptions, pgn *f
 		// 2. If not, check Lichess for position evals
 
 		bookMoves, _ := book.Get(boardFEN)
-		if !bookMoves.ContainsEvalsFrom("lichess") && board.FullMove <= 10 {
-			if err := book.CheckOnlineDatabase(ctx, boardFEN); err != nil {
-				return err
-			}
-			bookMoves, _ = book.Get(boardFEN)
-		}
-
-		updateBookMoves := bookMoves.HaveDifferentTimestamps() && !bookMoves.ContainsEvalsFrom("lichess")
+		updateBookMoves := board.FullMove != 1 // true //bookMoves.HaveDifferentTimestamps()
 
 		if updateBookMoves {
 			ucis := bookMoves.UCIs()
 			fmt.Printf("UCIs: %v\n", ucis)
 
-			opts2 := opts
-			opts2.DepthDelta += 1
-			opts2.MinTime += 5 * time.Second
-			opts2.MaxTime += 20 * time.Second
-			opts2.MinDepth += 2
-
-			evals, err := a.AnalyzePosition(ctx, opts2, boardFEN, ucis...)
+			evals, err := a.AnalyzePosition(ctx, opts, boardFEN, ucis...)
 			if err != nil {
 				return err
 			}
@@ -182,7 +169,6 @@ func (a *Analyzer) AnalyzeGame(ctx context.Context, opts AnalysisOptions, pgn *f
 		}
 
 		bestMove := bookMoves.GetBestMoveByEval(playerMoveUCI)
-		var secondBestMove *yamlbook.Move
 
 		if bestMove == nil {
 			logInfo("running engine to find best move...")
@@ -196,9 +182,13 @@ func (a *Analyzer) AnalyzeGame(ctx context.Context, opts AnalysisOptions, pgn *f
 			}
 
 			bestMove = evalsToBookMove(boardFEN, "sf15", evals[0], evals)
-			secondBestMove = evalsToBookMove(boardFEN, "sf15", evals[1], evals)
+			book.Add(boardFEN, bestMove)
 
-			book.Add(boardFEN, bestMove, secondBestMove)
+			for i := 1; i < len(evals); i++ {
+				anotherMove := evalsToBookMove(boardFEN, "sf15", evals[i], evals)
+				book.Add(boardFEN, anotherMove)
+			}
+
 			if err := book.Save(); err != nil {
 				return err
 			}
@@ -354,6 +344,7 @@ func (a *Analyzer) analyzePosition(ctx context.Context, opts AnalysisOptions, fe
 	}
 
 	maxNodes := int(float64(opts.MinNodes) * maxNodesMultiplier)
+	moveCount := max(len(moves), opts.MultiPV)
 	if len(moves) != 0 {
 		a.input <- fmt.Sprintf("setoption name MultiPV value %d", len(moves))
 		a.input <- fmt.Sprintf("go depth %d nodes %d movetime %d searchmoves %s", opts.MaxDepth, maxNodes, opts.MaxTime.Milliseconds(), strings.Join(moves, " "))
@@ -362,7 +353,7 @@ func (a *Analyzer) analyzePosition(ctx context.Context, opts AnalysisOptions, fe
 		a.input <- fmt.Sprintf("go depth %d nodes %d movetime %d", opts.MaxDepth, maxNodes, opts.MaxTime.Milliseconds())
 	}
 
-	evals := a.engineEvals(ctx, opts, fenPos)
+	evals := a.engineEvals(ctx, opts, fenPos, moveCount)
 	if len(evals) == 0 {
 		return nil, fmt.Errorf("no evaluations returned for fen '%s'", fenPos)
 	}

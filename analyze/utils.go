@@ -231,3 +231,17 @@ func plyToColor(ply int) fen.Color {
 	}
 	return fen.BlackPieces
 }
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}

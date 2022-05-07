@@ -10,7 +10,7 @@ import (
 	"trollfish-lichess/fen"
 )
 
-func (a *Analyzer) engineEvals(ctx context.Context, opts AnalysisOptions, fenPos string) []Eval {
+func (a *Analyzer) engineEvals(ctx context.Context, opts AnalysisOptions, fenPos string, moveCount int) []Eval {
 	start := time.Now()
 
 	var moves []Eval
@@ -28,7 +28,7 @@ func (a *Analyzer) engineEvals(ctx context.Context, opts AnalysisOptions, fenPos
 	minNodes := 0
 
 	board := fen.FENtoBoard(fenPos)
-	numberOfMoves := min(opts.MultiPV, len(board.AllLegalMoves()))
+	numberOfMoves := min(moveCount, len(board.AllLegalMoves()))
 
 loop:
 	for {
