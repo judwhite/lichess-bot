@@ -20,8 +20,8 @@ const SyzygyPath = "/home/jud/projects/tablebases/3-4-5:/home/jud/projects/table
 
 const startPosFEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
 const threads = 28
-const hashMemory = 49152 // aim for 70% hashfull // 40960 * 2
-const maxNodesMultiplier = 2
+const hashMemory = 81920        // aim for 70% hashfull
+const maxNodes = 25_156_594_000 // arbitrarily large value (nps * 1000)
 
 // TODO: put in config
 const stockfishBinary = "/home/jud/projects/trollfish/stockfish/stockfish"
@@ -130,19 +130,21 @@ func (a *Analyzer) AnalyzeGame(ctx context.Context, opts AnalysisOptions, pgn *f
 			logMultiline(tbl)
 		}
 
-		// TODO: lookup positions on Lichess only if there are N pieces left on the board (30,31,32, for example)
-
-		// 1. Check the book to see if we have stored lichess evals
-		// 2. If not, check Lichess for position evals
-
 		bookMoves, _ := book.Get(boardFEN)
-		updateBookMoves := board.FullMove != 1 // true //bookMoves.HaveDifferentTimestamps()
+		updateBookMoves := board.FullMove != 1 && (bookMoves.HaveDifferentTimestamps() || bookMoves.TooOld() || len(bookMoves) < 3)
 
 		if updateBookMoves {
 			ucis := bookMoves.UCIs()
 			fmt.Printf("UCIs: %v\n", ucis)
 
-			evals, err := a.AnalyzePosition(ctx, opts, boardFEN, ucis...)
+			var evals []Eval
+			if len(ucis) < opts.MultiPV && len(ucis) != len(board.AllLegalMoves()) {
+				// TODO: if UCIs don't show up re-run analysis
+				evals, err = a.AnalyzePosition(ctx, opts, boardFEN)
+			} else {
+				evals, err = a.AnalyzePosition(ctx, opts, boardFEN, ucis...)
+			}
+
 			if err != nil {
 				return err
 			}
@@ -150,21 +152,15 @@ func (a *Analyzer) AnalyzeGame(ctx context.Context, opts AnalysisOptions, pgn *f
 			fmt.Printf("UCIs: %v\n", ucis)
 			fmt.Printf("len(bokMoves): %d\n", len(bookMoves))
 			fmt.Printf("len(evals): %d\n", len(evals))
-			for i := 0; i < len(bookMoves); i++ {
-				fmt.Printf("adding %s\n", evals[i].UCIMove)
-				bookMove := evalsToBookMove(boardFEN, "sf15", evals[i], evals)
-				book.Add(boardFEN, bookMove)
-				fmt.Printf("added %v\n", *bookMove)
-			}
 
-			if err := book.Save(); err != nil {
+			if err := a.SaveEvalsToBook(book, boardFEN, evals); err != nil {
 				return err
 			}
 
 			bookMoves, _ = book.Get(boardFEN)
 			fmt.Printf("super sketchy code done, go check it out\n")
 			for _, bookMove := range bookMoves {
-				fmt.Printf("new: %s %v\n", bookMove.Move, *bookMove)
+				fmt.Printf("book move: %s %v\n", bookMove.Move, *bookMove)
 			}
 		}
 
@@ -181,22 +177,17 @@ func (a *Analyzer) AnalyzeGame(ctx context.Context, opts AnalysisOptions, pgn *f
 				logInfo(fmt.Sprintf("depth: %d move: %s global_cp: %4d global_mate: %4d", eval.Depth, eval.UCIMove, eval.GlobalCP(player), eval.GlobalMate(player)))
 			}
 
-			bestMove = evalsToBookMove(boardFEN, "sf15", evals[0], evals)
-			book.Add(boardFEN, bestMove)
-
-			for i := 1; i < len(evals); i++ {
-				anotherMove := evalsToBookMove(boardFEN, "sf15", evals[i], evals)
-				book.Add(boardFEN, anotherMove)
-			}
-
-			if err := book.Save(); err != nil {
+			if err := a.SaveEvalsToBook(book, boardFEN, evals); err != nil {
 				return err
 			}
+
 			bookMoves, _ = book.Get(boardFEN)
 			for _, bookMove := range bookMoves {
 				fmt.Printf("new: %s %v\n", bookMove.Move, *bookMove)
 			}
 		}
+
+		bestMove = bookMoves.GetBestMoveByEval(playerMoveUCI)
 
 		// TODO: keep for a book-only analysis?
 		//if len(evals) == 0 {
@@ -220,41 +211,37 @@ func (a *Analyzer) AnalyzeGame(ctx context.Context, opts AnalysisOptions, pgn *f
 		if playerMove == nil {
 			logInfo(fmt.Sprintf("playerMoveSAN: '%s' bestMove.Move: '%s'", playerMoveSAN, bestMove.Move))
 
-			opts2 := opts
-			opts2.DepthDelta += 1
-			opts2.MinTime += 5 * time.Second
-			opts2.MaxTime += 20 * time.Second
-			opts2.MinDepth += 2
-
 			// TODO: extract playerMove, bestMove from evals. may have gotten bestMove from analysis or book. handle both.
 			// TODO: make this work:
 			// evals, err = a.AnalyzePosition(ctx, opts, boardFEN, bestMove.UCIMove, playerMoveUCI)
 			logInfo(fmt.Sprintf("played move %s wasn't the best (best was %s) and eval not found in book. running engine to find player's move...", playerMoveSAN, bestMove.Move))
-			evals, err := a.AnalyzePosition(ctx, opts2, boardFEN, bestMove.UCI(), playerMoveUCI)
+
+			bookMovesPlusPlayerMoves := []string{playerMoveUCI}
+			bookMovesPlusPlayerMoves = append(bookMovesPlusPlayerMoves, bookMoves.UCIs()...)
+
+			evals, err := a.AnalyzePosition(ctx, opts, boardFEN, bookMovesPlusPlayerMoves...)
 			if err != nil {
 				return err
 			}
 
-			move1 := evalsToBookMove(boardFEN, "sf15", evals[0], evals)
-			move2 := evalsToBookMove(boardFEN, "sf15", evals[1], evals)
-
-			if move1.UCI() != playerMoveUCI && move1.CP == move2.CP && move1.Mate == move2.Mate {
-				playerMove = move2
-				bestMove = move2
-			} else if move1.UCI() == playerMoveUCI {
-				playerMove = move1
-				bestMove = move2
-			} else if move2.UCI() == playerMoveUCI {
-				bestMove = move1
-				playerMove = move2
-			} else {
-				panic(fmt.Errorf("move1: %s move2: %s playerMoveUCI: %s bestMove: %s fen: %s\n\nevals:\n%#v\n",
-					move1.Move, move2.Move, playerMoveUCI, bestMove.UCI(), boardFEN, evals))
+			for _, eval := range evals {
+				logInfo(fmt.Sprintf("depth: %d move: %s global_cp: %4d global_mate: %4d", eval.Depth, eval.UCIMove, eval.GlobalCP(player), eval.GlobalMate(player)))
 			}
 
-			book.Add(boardFEN, move1, move2)
-			if err := book.Save(); err != nil {
+			if err := a.SaveEvalsToBook(book, boardFEN, evals); err != nil {
 				return err
+			}
+
+			bookMoves, _ = book.Get(boardFEN)
+			for _, bookMove := range bookMoves {
+				fmt.Printf("new: %s %v\n", bookMove.Move, *bookMove)
+			}
+
+			bestMove = bookMoves.GetBestMoveByEval(playerMoveUCI)
+			if bestMove.Move == playerMoveSAN {
+				playerMove = bestMove
+			} else {
+				playerMove = bookMoves.GetSAN(playerMoveSAN)
 			}
 		}
 
@@ -343,9 +330,11 @@ func (a *Analyzer) analyzePosition(ctx context.Context, opts AnalysisOptions, fe
 		return nil, fmt.Errorf("TODO: position '%s' is already game over", fenPos)
 	}
 
-	maxNodes := int(float64(opts.MinNodes) * maxNodesMultiplier)
 	moveCount := max(len(moves), opts.MultiPV)
 	if len(moves) != 0 {
+		if len(moves) == 1 {
+			panic(fmt.Errorf("len(moves) = %d; most likely not intended. moves: %v", len(moves), moves))
+		}
 		a.input <- fmt.Sprintf("setoption name MultiPV value %d", len(moves))
 		a.input <- fmt.Sprintf("go depth %d nodes %d movetime %d searchmoves %s", opts.MaxDepth, maxNodes, opts.MaxTime.Milliseconds(), strings.Join(moves, " "))
 	} else {

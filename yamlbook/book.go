@@ -78,6 +78,17 @@ func (m Moves) HaveDifferentTimestamps() bool {
 	return false
 }
 
+func (m Moves) TooOld() bool {
+	minAge := time.Now().Add(-48 * time.Hour).Unix()
+
+	for i := 0; i < len(m); i++ {
+		if m[i].TS < minAge {
+			return true
+		}
+	}
+	return false
+}
+
 func (m Moves) GetSAN(san string) *Move {
 	for _, move := range m {
 		if move.Move == san {
@@ -246,7 +257,15 @@ func Load(filename string) (*Book, error) {
 	}
 
 	for _, pos := range book.Positions {
-		sort.Sort(pos.Moves)
+		for _, move := range pos.Moves {
+			line := move.GetLastLogLineFor(move.Move)
+			var empty LogLine
+			if line != empty && line.CP != move.CP {
+				move.CP = line.CP
+			}
+		}
+
+		sort.Stable(pos.Moves)
 		book.posMap[pos.FEN] = pos
 	}
 
@@ -348,6 +367,7 @@ func (b *Book) Add(fenKey string, moves ...*Move) {
 
 	if len(moves) > 0 {
 		position.Moves = append(position.Moves, moves...)
+		sort.Stable(position.Moves)
 	}
 }
 
@@ -466,7 +486,7 @@ func (b *Book) BestMove(fenPos string) (*Move, string) {
 		return nil, ""
 	}
 
-	sort.Sort(pos.Moves)
+	sort.Stable(pos.Moves)
 	moves := pos.Moves
 
 	if len(moves) == 0 {
@@ -518,8 +538,9 @@ func (b *Book) BestMove(fenPos string) (*Move, string) {
 		for _, card := range deck {
 			if card.start <= num && card.end >= num {
 				bestMove = moves[card.index]
-				fmt.Printf("WEIGHTED CHOICE: choices: %d sum: %d num: %d<=%d<=%d pick: %s cp: %d\n",
-					len(deck), sum, card.start, num, card.end, bestMove.Move, bestMove.CP)
+				chancePercent := float64(card.end-card.start) / float64(sum)
+				fmt.Printf("WEIGHTED CHOICE: choices: %d sum: %d num: %d<=%d<=%d %4.1f%% pick: %s cp: %d\n",
+					len(deck), sum, card.start, num, card.end, chancePercent*100, bestMove.Move, bestMove.CP)
 				break
 			}
 		}
