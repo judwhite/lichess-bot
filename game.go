@@ -245,31 +245,29 @@ func (g *Game) handleGameFull(ndjson []byte) {
 		g.playerBook = m
 	}
 
-	book1, err := polyglot.LoadBook("gm2600.bin")
-	if err != nil {
-		panic(err)
-	}
-	book2, err := polyglot.LoadBook("Elo2400.bin")
-	if err != nil {
-		panic(err)
-	}
-	book3, err := polyglot.LoadBook("Performance.bin")
-	if err != nil {
-		panic(err)
-	}
-	book4, err := polyglot.LoadBook("varied.bin")
-	if err != nil {
-		panic(err)
-	}
-	book5, err := polyglot.LoadBook("Cerebellum3Merge.bin")
-	if err != nil {
-		panic(err)
-	}
-
 	if g.opponent.Title != "BOT" {
-		g.books = append(g.books, book1, book2, book3, book4, book5)
-	} else {
-		g.books = append(g.books, book3, book4, book1)
+		gm2600, err := polyglot.LoadBook("gm2600.bin")
+		if err != nil {
+			panic(err)
+		}
+		elo2400, err := polyglot.LoadBook("Elo2400.bin")
+		if err != nil {
+			panic(err)
+		}
+		performance, err := polyglot.LoadBook("Performance.bin")
+		if err != nil {
+			panic(err)
+		}
+		varied, err := polyglot.LoadBook("varied.bin")
+		if err != nil {
+			panic(err)
+		}
+		cerebellum3Merge, err := polyglot.LoadBook("Cerebellum3Merge.bin")
+		if err != nil {
+			panic(err)
+		}
+
+		g.books = append(g.books, gm2600, elo2400, performance, varied, cerebellum3Merge)
 	}
 
 	g.waitReady()
