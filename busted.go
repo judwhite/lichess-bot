@@ -2,6 +2,8 @@ package main
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
 
 	"trollfish-lichess/fen"
@@ -147,4 +149,12 @@ func (mc *MoveChance) Update() {
 	mc.WinPercent = mc.Win * 100 / mc.Total
 	mc.DrawPercent = mc.Draw * 100 / mc.Total
 	mc.LosePercent = mc.Lose * 100 / mc.Total
+}
+
+func fileExists(filename string) bool {
+	_, err := os.Stat(filename)
+	if os.IsNotExist(err) {
+		return false
+	}
+	return true
 }

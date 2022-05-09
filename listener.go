@@ -47,6 +47,7 @@ type Listener struct {
 	declined         chan api.Challenge
 	accepted         chan api.GameEventInfo
 	onlyUser         string
+	fenPos           string
 	tc               TimeControl
 
 	input  chan<- string
@@ -81,7 +82,7 @@ func (tc *TimeControl) Parse(text string) error {
 	}
 
 	if tcMins >= 30 {
-		tc.Limit = tcMins
+		tc.Limit = tcMins // ex, 30+0 = 30 seconds no increment
 	} else {
 		tc.Limit = tcMins * 60
 	}
@@ -90,7 +91,7 @@ func (tc *TimeControl) Parse(text string) error {
 	return nil
 }
 
-func New(ctx context.Context, input chan<- string, output <-chan string, onlyUser, challenge string, tc TimeControl) *Listener {
+func New(ctx context.Context, input chan<- string, output <-chan string, onlyUser, challenge string, tc TimeControl, fenPos string) *Listener {
 	l := Listener{
 		ctx:      ctx,
 		input:    input,
@@ -98,6 +99,7 @@ func New(ctx context.Context, input chan<- string, output <-chan string, onlyUse
 		declined: make(chan api.Challenge, 512),
 		accepted: make(chan api.GameEventInfo, 512),
 		onlyUser: strings.ToLower(onlyUser),
+		fenPos:   fenPos,
 		tc:       tc,
 	}
 	input <- "uci"
@@ -128,7 +130,7 @@ func New(ctx context.Context, input chan<- string, output <-chan string, onlyUse
 
 	if challenge != "" {
 		go func() {
-			l.challenge(challenge, true, tc.Limit, tc.Increment, "random")
+			l.challenge(challenge, false, tc.Limit, tc.Increment, "random", fenPos)
 		}()
 	}
 
@@ -261,7 +263,7 @@ func (l *Listener) QueueChallenge(c api.Challenge) error {
 	}
 
 	// only use standard initial position
-	if c.InitialFEN != "" && c.InitialFEN != "startpos" {
+	if c.InitialFEN != "" && c.InitialFEN != "startpos" && !strings.EqualFold(c.Challenger.Name, l.onlyUser) {
 		if err := api.DeclineChallenge(c.ID, "standard"); err != nil {
 			return err
 		}
@@ -453,7 +455,7 @@ func (l *Listener) challengeBot() {
 				tcLimit, tcIncrement = 0, 1
 			}
 
-			resp := l.challenge(bot.User.ID, true, tcLimit, tcIncrement, "random")
+			resp := l.challenge(bot.User.ID, true, tcLimit, tcIncrement, "random", "")
 			if l.Quit() {
 				return
 			}
@@ -502,7 +504,7 @@ type TryChallengeResponse struct {
 	Accepted           bool
 }
 
-func (l *Listener) challenge(userID string, rated bool, limit, increment int, color string) TryChallengeResponse {
+func (l *Listener) challenge(userID string, rated bool, limit, increment int, color, fenPos string) TryChallengeResponse {
 	l.activeGameMtx.Lock()
 	l.challengeQueueMtx.Lock()
 	isBusy := (l.activeGame != nil && !l.activeGame.finished) || l.challengePending
@@ -529,7 +531,7 @@ func (l *Listener) challenge(userID string, rated bool, limit, increment int, co
 	fmt.Printf("%s sending challenge to %s...\n", ts(), userID)
 	//return TryChallengeResponse{DailyLimit: true}
 
-	challengeID, err := api.CreateChallenge(userID, rated, limit, increment, color, "standard")
+	challengeID, err := api.CreateChallenge(userID, rated, limit, increment, color, "standard", fenPos)
 	if err != nil {
 		if strings.Contains(err.Error(), "429") {
 			fmt.Printf("%s outgoing challenge limit exceeded for the day\n", ts())

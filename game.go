@@ -19,12 +19,13 @@ import (
 type Game struct {
 	sync.Mutex
 
-	gameID       string
-	playerNumber int
-	rated        bool
-	gaveTime     bool
-	opponent     api.Player
-	finished     bool
+	gameID      string
+	initialFEN  string
+	playerColor fen.Color
+	rated       bool
+	gaveTime    bool
+	opponent    api.Player
+	finished    bool
 
 	chatPlayerRoomNoTalking    bool
 	chatSpectatorRoomNoTalking bool
@@ -59,13 +60,13 @@ type SavedMove struct {
 
 func NewGame(gameID string, input chan<- string, output <-chan string, book *yamlbook.Book) *Game {
 	return &Game{
-		gameID:       gameID,
-		playerNumber: -1,
-		input:        input,
-		output:       output,
-		book:         book,
-		seenPos:      make(map[string]int),
-		canGiveTime:  true,
+		gameID:      gameID,
+		playerColor: -999,
+		input:       input,
+		output:      output,
+		book:        book,
+		seenPos:     make(map[string]int),
+		canGiveTime: true,
 	}
 }
 
@@ -144,10 +145,10 @@ func (g *Game) saveToRecent() {
 		_ = fp.Close()
 	}()
 
-	for i, move := range g.moves {
+	for _, move := range g.moves {
 		b := fen.FENtoBoard(move.FEN)
 
-		ourMove := i%2 == g.playerNumber
+		ourMove := b.ActiveColor == g.playerColor
 		_, found := g.book.GetAll(move.FEN)
 		if !found && ourMove && b.FullMove <= 25 {
 			_, err = fmt.Fprintf(fp, "- fen: %s\n", fen.Key(move.FEN))
@@ -208,16 +209,22 @@ func (g *Game) handleGameFull(ndjson []byte) {
 	}
 
 	if game.White.ID == botID {
-		g.playerNumber = 0
+		g.playerColor = fen.WhitePieces
 		g.opponent = game.Black
 	} else if game.Black.ID == botID {
-		g.playerNumber = 1
+		g.playerColor = fen.BlackPieces
 		g.opponent = game.White
 	} else {
 		log.Fatalf("not your game %s vs %s\n", game.White.ID, game.Black.ID)
 	}
 
 	g.rated = game.Rated
+	g.initialFEN = game.InitialFEN
+	if g.initialFEN == "" {
+		g.initialFEN = "startpos"
+	}
+
+	fmt.Printf("initialFEN: '%s'\n", g.initialFEN)
 
 	var rated string
 	if g.rated {
@@ -238,7 +245,7 @@ func (g *Game) handleGameFull(ndjson []byte) {
 		timeControl,
 	)
 
-	m, err := Busted(strings.ToLower(g.opponent.ID)+".pgn", iif(g.playerNumber == 0, fen.WhitePieces, fen.BlackPieces))
+	m, err := Busted(strings.ToLower(g.opponent.ID)+".pgn", g.playerColor)
 	if err != nil {
 		fmt.Printf("%s ?-?-?-?-? %v\n", ts(), err)
 	} else {
@@ -305,9 +312,9 @@ func (g *Game) handleGameState(ndjson []byte) {
 
 	if state.Winner != "" {
 		var color string
-		if g.playerNumber == 0 {
+		if g.playerColor == fen.WhitePieces {
 			color = "white"
-		} else if g.playerNumber == 1 {
+		} else if g.playerColor == fen.BlackPieces {
 			color = "black"
 		}
 
@@ -342,7 +349,7 @@ func (g *Game) playMove(ndjson []byte, state api.State) {
 	g.Unlock()
 
 	var opponentTime, ourTime time.Duration
-	if g.playerNumber == 0 {
+	if g.playerColor == fen.WhitePieces {
 		ourTime = time.Duration(state.WhiteTime) * time.Millisecond
 		opponentTime = time.Duration(state.BlackTime) * time.Millisecond
 	} else {
@@ -354,7 +361,15 @@ func (g *Game) playMove(ndjson []byte, state api.State) {
 	if len(moves) == 1 && len(moves[0]) == 0 {
 		moves = nil
 	}
-	if len(moves)%2 != g.playerNumber {
+
+	board := fen.FENtoBoard(g.initialFEN)
+	sans := board.UCItoSANs(moves...)
+	moves, _ = board.SANtoUCIs(sans...)
+	state.Moves = strings.Join(moves, " ")
+
+	board2 := board
+	board2.Moves(moves...)
+	if board2.ActiveColor != g.playerColor {
 		fmt.Printf("%s waiting for opponent...\n", ts())
 		return
 	}
@@ -364,7 +379,6 @@ func (g *Game) playMove(ndjson []byte, state api.State) {
 	}
 
 	var ponderHit bool
-	var board fen.Board
 
 	if len(moves) > 1 {
 		opponentMoveUCI := moves[len(moves)-1]
@@ -454,7 +468,7 @@ func (g *Game) playMove(ndjson []byte, state api.State) {
 
 	if bookMoveUCI != "" && !repetition {
 		bestMove = bookMoveUCI
-		povMultiplier := iif(g.playerNumber == 0, 1, -1)
+		povMultiplier := iif(g.playerColor == fen.WhitePieces, 1, -1)
 		g.humanEval = iif(bookMoveMate == 0, fmt.Sprintf("%0.2f", float64(bookMoveCP*povMultiplier)/100), fmt.Sprintf("M%d", bookMoveMate*povMultiplier))
 
 		fmt.Printf("%s %s - BOOK MOVE: %s (%s), eval %s\n", ts(), board.FEN(), board.UCItoSAN(bestMove), bestMove, g.humanEval)
@@ -477,10 +491,11 @@ func (g *Game) playMove(ndjson []byte, state api.State) {
 			g.stopPondering()
 
 			var pos string
+			addPosFen := iif(g.initialFEN == "startpos", "", "fen ")
 			if state.Moves == "" {
-				pos = fmt.Sprintf("position startpos")
+				pos = fmt.Sprintf("position %s%s", addPosFen, g.initialFEN)
 			} else {
-				pos = fmt.Sprintf("position startpos moves %s", state.Moves)
+				pos = fmt.Sprintf("position %s%s moves %s", addPosFen, g.initialFEN, state.Moves)
 			}
 
 			goCmd := fmt.Sprintf("go wtime %d winc %d btime %d binc %d",
@@ -519,16 +534,16 @@ func (g *Game) playMove(ndjson []byte, state api.State) {
 						if strings.HasPrefix(g.humanEval, "M") {
 							mateText := g.humanEval[1:]
 							mate, _ := strconv.Atoi(mateText)
-							if g.playerNumber == 0 && mate > 0 {
+							if g.playerColor == fen.WhitePieces && mate > 0 {
 								g.aboutToMate = true
-							} else if g.playerNumber == 1 && mate < 0 {
+							} else if g.playerColor == fen.BlackPieces && mate < 0 {
 								g.aboutToMate = true
 							}
 						} else {
 							cp, _ := strconv.ParseFloat(g.humanEval, 64)
-							if g.playerNumber == 0 && cp >= 150 {
+							if g.playerColor == fen.WhitePieces && cp >= 150 {
 								g.aboutToMate = true
-							} else if g.playerNumber == 1 && cp <= -150 {
+							} else if g.playerColor == fen.BlackPieces && cp <= -150 {
 								g.aboutToMate = true
 							}
 						}
@@ -572,7 +587,7 @@ func (g *Game) playMove(ndjson []byte, state api.State) {
 	if err := g.sendMoveToServer(bestMove, offerDraw); err != nil {
 		// '{"error":"Not your turn, or game already over"}'
 		// TODO: we should handle the opponent resigning, flagging or aborting while we're thinking
-		fmt.Printf("%s *** ERR: api.PlayMove: %v: %s\n", ts(), err, string(ndjson))
+		fmt.Printf("%s *** ERR: api.PlayMove: %v: %s initialFEN: '%s' len(moves): %d board: '%s'\n", ts(), err, string(ndjson), g.initialFEN, len(moves), board.FEN())
 
 		g.Finish()
 		return
@@ -621,17 +636,18 @@ func (g *Game) ponderMove(ponderMoveUCI string, state api.State, playedMoveUCI s
 	g.totalPonders++
 
 	var pos string
+	addPosFen := iif(g.initialFEN == "startpos", "", "fen ")
 	if state.Moves == "" {
-		pos = fmt.Sprintf("position startpos moves %s %s", playedMoveUCI, g.ponder)
+		pos = fmt.Sprintf("position %s%s moves %s %s", addPosFen, g.initialFEN, playedMoveUCI, g.ponder)
 	} else {
-		pos = fmt.Sprintf("position startpos moves %s %s %s", state.Moves, playedMoveUCI, g.ponder)
+		pos = fmt.Sprintf("position %s%s moves %s %s %s", addPosFen, g.initialFEN, state.Moves, playedMoveUCI, g.ponder)
 	}
 
 	var goCmd string
 	elapsed := int(time.Since(state.MessageReceived).Milliseconds())
-	whiteTime := state.WhiteTime - iif(g.playerNumber == 0, elapsed, 0)
+	whiteTime := state.WhiteTime - iif(g.playerColor == fen.BlackPieces, elapsed, 0)
 	whiteTime = max(whiteTime, 50)
-	blackTime := state.BlackTime - iif(g.playerNumber == 0, 0, elapsed)
+	blackTime := state.BlackTime - iif(g.playerColor == fen.WhitePieces, 0, elapsed)
 	blackTime = max(blackTime, 50)
 
 	goCmd = fmt.Sprintf("go ponder wtime %d winc %d btime %d binc %d",
@@ -659,12 +675,12 @@ func (g *Game) sendMoveToServer(bestMove string, offerDraw bool) error {
 
 func (g *Game) maybeGiveTime(ourTime, opponentTime time.Duration) {
 	// add time for human players :D
-	if opponentTime < 15*time.Second && ourTime > opponentTime && !g.gaveTime && g.opponent.Title != "BOT" {
+	if opponentTime < 30*time.Second && ourTime > opponentTime && !g.gaveTime && g.opponent.Title != "BOT" {
 		g.gaveTime = true
 		fmt.Printf("%s *** attempting to give time!\n", ts())
 		for i := 0; i < 6; i++ {
 			go func() {
-				if err := api.AddTime(g.gameID, 15); err != nil {
+				if err := api.AddTime(g.gameID, 60); err != nil {
 					log.Printf("AddTime: %v\n", err)
 				}
 			}()

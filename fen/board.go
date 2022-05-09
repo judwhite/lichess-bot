@@ -577,7 +577,7 @@ func FENtoBoard(fen string) Board {
 }
 
 func (b *Board) LoadFEN(fen string) {
-	if fen == "" {
+	if fen == "" || fen == "startpos" {
 		fen = startPosFEN
 	}
 
@@ -598,7 +598,7 @@ func (b *Board) LoadFEN(fen string) {
 	} else if parts[1] == "b" {
 		activeColor = BlackPieces
 	} else {
-		log.Fatalf("active color '%s' is invalid", parts[1])
+		panic(fmt.Errorf("active color '%s' is invalid. fen: %s", parts[1], fen))
 	}
 
 	var wk, wq, bk, bq bool

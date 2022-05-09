@@ -101,7 +101,7 @@ func main() {
 			log.Fatal(err)
 		}
 
-		runLichessBot(onlyUser, challenge, timeControl)
+		runLichessBot(onlyUser, challenge, timeControl, updateBookFEN)
 		return
 	}
 
@@ -322,7 +322,7 @@ func positionLookup() {
 	fmt.Printf("%s\n", b)
 }
 
-func runLichessBot(onlyUser, challenge string, tc TimeControl) {
+func runLichessBot(onlyUser, challenge string, tc TimeControl, fenPos string) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -333,7 +333,7 @@ func runLichessBot(onlyUser, challenge string, tc TimeControl) {
 		log.Fatal(err)
 	}
 
-	listener := New(ctx, input, output, onlyUser, challenge, tc)
+	listener := New(ctx, input, output, onlyUser, challenge, tc, fenPos)
 
 	if err := listener.Events(); err != nil {
 		log.Fatal(err)

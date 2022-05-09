@@ -497,7 +497,7 @@ func Chat(gameID, room, text string) error {
 	return nil
 }
 
-func CreateChallenge(id string, rated bool, clockLimit, clockIncrement int, color, variant string) (string, error) {
+func CreateChallenge(id string, rated bool, clockLimit, clockIncrement int, color, variant, fenPos string) (string, error) {
 	fmt.Printf("%s REQ: %s '%s'\n", ts(), "CreateChallenge", id)
 
 	endpoint := fmt.Sprintf("https://lichess.org/api/challenge/%s", url.PathEscape(id))
@@ -508,6 +508,9 @@ func CreateChallenge(id string, rated bool, clockLimit, clockIncrement int, colo
 	data.Add("clock.increment", fmt.Sprintf("%d", clockIncrement))
 	data.Add("color", color)
 	data.Add("variant", variant)
+	if fenPos != "" {
+		data.Add("fen", fenPos)
+	}
 
 	body := data.Encode()
 	req, err := http.NewRequest("POST", endpoint, strings.NewReader(body))
