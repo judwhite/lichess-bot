@@ -347,15 +347,6 @@ func (a *Analyzer) analyzePosition(ctx context.Context, opts AnalysisOptions, fe
 		return nil, fmt.Errorf("no evaluations returned for fen '%s'", fenPos)
 	}
 
-	floorDepth := opts.MinDepth - opts.DepthDelta + 1
-	for i := 0; i < len(evals); i++ {
-		if evals[i].Depth < floorDepth {
-			evals = append(evals[:i], evals[i+1:]...)
-			i--
-			continue
-		}
-	}
-
 	logInfo("")
 	var best Eval
 	for _, eval := range evals {
