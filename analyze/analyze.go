@@ -103,6 +103,7 @@ func (a *Analyzer) AnalyzeGame(ctx context.Context, opts AnalysisOptions, pgn *f
 		playerMoveSAN := board.UCItoSAN(playerMoveUCI)
 
 		player := board.ActiveColor
+		legalMoveCount := len(board.AllLegalMoves())
 
 		nextBoard := fen.FENtoBoard(boardFEN)
 		nextBoard.Moves(playerMoveUCI)
@@ -132,14 +133,20 @@ func (a *Analyzer) AnalyzeGame(ctx context.Context, opts AnalysisOptions, pgn *f
 		}
 
 		bookMoves, _ := book.Get(boardFEN)
-		updateBookMoves := board.FullMove != 1 && (bookMoves.HaveDifferentTimestamps() || bookMoves.TooOld() || len(bookMoves) < 3)
+
+		diffTS := bookMoves.HaveDifferentTimestamps()
+		tooFewMoves := len(bookMoves) < 3 && len(bookMoves) != legalMoveCount
+		tooOld := bookMoves.TooOld()
+
+		needsUpdate := diffTS || tooFewMoves || tooOld
+		updateBookMoves := board.FullMove != 1 && needsUpdate
 
 		if updateBookMoves {
 			ucis := bookMoves.UCIs()
 			fmt.Printf("UCIs: %v\n", ucis)
 
 			var evals []Eval
-			if len(ucis) < opts.MultiPV && len(ucis) != len(board.AllLegalMoves()) {
+			if len(ucis) < opts.MultiPV && len(ucis) != legalMoveCount {
 				// TODO: if UCIs don't show up re-run analysis
 				evals, err = a.AnalyzePosition(ctx, opts, boardFEN)
 			} else {
