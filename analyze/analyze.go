@@ -121,8 +121,8 @@ func (a *Analyzer) AnalyzeGame(ctx context.Context, opts AnalysisOptions, pgn *f
 
 		// per-ply debug output
 		if len(movesEval) > 0 {
-			//pgn := evalToPGN(startPosFEN, 0, movesEval, false)
-			//logMultiline(pgn)
+			pgn := evalToPGN(pgn, movesEval)
+			logMultiline(pgn)
 			//if err := ioutil.WriteFile("eval.pgn", []byte(pgn), 0644); err != nil {
 			//	return err
 			//}
@@ -272,13 +272,13 @@ func (a *Analyzer) AnalyzeGame(ctx context.Context, opts AnalysisOptions, pgn *f
 		board.Moves(playerMoveUCI)
 	}
 
-	evalPGN := evalToPGN(startPosFEN, 0, movesEval, true)
+	evalPGN := evalToPGN(pgn, movesEval)
 	logMultiline(evalPGN)
 
 	tbl := debugEvalTable(startPosFEN, movesEval)
 	logMultiline(tbl)
 
-	if err := ioutil.WriteFile("eval.pgn", []byte(evalPGN), 0644); err != nil {
+	if err := ioutil.WriteFile(fmt.Sprintf("eval%d.pgn", time.Now().Unix()), []byte(evalPGN), 0644); err != nil {
 		logMultiline(evalPGN)
 		log.Fatal(err)
 	}
