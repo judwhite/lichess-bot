@@ -29,6 +29,7 @@ func (a *Analyzer) engineEvals(ctx context.Context, opts AnalysisOptions, fenPos
 
 	board := fen.FENtoBoard(fenPos)
 	numberOfMoves := min(moveCount, len(board.AllLegalMoves()))
+	linesSincePrevDepthSeen := 0
 
 loop:
 	for {
@@ -55,8 +56,14 @@ loop:
 
 			// annoying (but probably useful to UI) update of old depth
 			if eval.Depth < maxDepth {
+				if linesSincePrevDepthSeen == moveCount-1 {
+					logInfo("")
+				}
+				linesSincePrevDepthSeen = 0
 				continue
 			}
+
+			linesSincePrevDepthSeen++
 
 			minNodes = eval.Nodes
 			if eval.Depth > maxDepth {

@@ -160,7 +160,7 @@ func (a *Analyzer) AnalyzeGame(ctx context.Context, opts AnalysisOptions, pgn *f
 			bookMoves, _ = book.Get(boardFEN)
 			fmt.Printf("super sketchy code done, go check it out\n")
 			for _, bookMove := range bookMoves {
-				fmt.Printf("book move: %s %v\n", bookMove.Move, *bookMove)
+				fmt.Printf("book move: %s cp: %3d fen: %-72s\n", bookMove.Move, bookMove.CP, bookMove.FEN())
 			}
 		}
 
