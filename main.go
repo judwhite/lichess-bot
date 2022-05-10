@@ -25,12 +25,12 @@ import (
 )
 
 var defaultAnalysisOptions = analyze.AnalysisOptions{
-	MinDepth:   34,
+	MinDepth:   45,
 	MaxDepth:   80,
 	MinTime:    60 * time.Second,
-	MaxTime:    30 * time.Minute,
+	MaxTime:    60 * time.Minute,
 	DepthDelta: 3,
-	MultiPV:    3,
+	MultiPV:    5,
 	MinNodes:   3_600_000_000,
 }
 
