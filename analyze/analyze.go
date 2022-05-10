@@ -20,9 +20,7 @@ const SyzygyPath = "/home/jud/projects/tablebases/3-4-5:/home/jud/projects/table
 
 const startPosFEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
 const threads = 28
-const hashMemory = 90112        // aim for 70% hashfull
-const maxNodes = 20_852_058_695 // should be about 100% hashfull
-//const maxNodes = 25_156_594_000 // arbitrarily large value (nps * 1000)
+const hashMemory = 98304
 
 // TODO: put in config
 const stockfishBinary = "/home/jud/projects/trollfish/stockfish/stockfish"
@@ -345,11 +343,11 @@ func (a *Analyzer) analyzePosition(ctx context.Context, opts AnalysisOptions, fe
 		}
 		moveCount = len(moves)
 		a.input <- fmt.Sprintf("setoption name MultiPV value %d", len(moves))
-		a.input <- fmt.Sprintf("go depth %d nodes %d movetime %d searchmoves %s", opts.MaxDepth, maxNodes, opts.MaxTime.Milliseconds(), strings.Join(moves, " "))
+		a.input <- fmt.Sprintf("go depth %d movetime %d searchmoves %s", opts.MaxDepth, opts.MaxTime.Milliseconds(), strings.Join(moves, " "))
 	} else {
 		moveCount = opts.MultiPV
 		a.input <- fmt.Sprintf("setoption name MultiPV value %d", opts.MultiPV)
-		a.input <- fmt.Sprintf("go depth %d nodes %d movetime %d", opts.MaxDepth, maxNodes, opts.MaxTime.Milliseconds())
+		a.input <- fmt.Sprintf("go depth %d movetime %d", opts.MaxDepth, opts.MaxTime.Milliseconds())
 	}
 
 	evals := a.engineEvals(ctx, opts, fenPos, moveCount)
