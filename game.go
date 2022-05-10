@@ -245,11 +245,13 @@ func (g *Game) handleGameFull(ndjson []byte) {
 		timeControl,
 	)
 
-	m, err := Busted(strings.ToLower(g.opponent.ID)+".pgn", g.playerColor)
-	if err != nil {
-		fmt.Printf("%s ?-?-?-?-? %v\n", ts(), err)
-	} else {
-		g.playerBook = m
+	if g.opponent.Title != "BOT" {
+		m, err := Busted(strings.ToLower(g.opponent.ID)+".pgn", g.playerColor)
+		if err != nil {
+			fmt.Printf("%s ?-?-?-?-? %v\n", ts(), err)
+		} else {
+			g.playerBook = m
+		}
 	}
 
 	if g.opponent.Title != "BOT" {
