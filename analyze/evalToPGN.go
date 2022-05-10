@@ -7,37 +7,32 @@ import (
 	"trollfish-lichess/fen"
 )
 
-func evalToPGN(startFEN string, engineDepth int, movesEval Moves, header bool) string {
+func evalToPGN(pgn *fen.PGNGame, movesEval Moves) string {
 	var sb strings.Builder
 
-	if header {
-		sb.WriteString(fmt.Sprintf("[Event \"?\"]\n"))
-		sb.WriteString(fmt.Sprintf("[Site \"?\"]\n"))
-		sb.WriteString(fmt.Sprintf("[Date \"????.??.??\"]\n"))
-		sb.WriteString(fmt.Sprintf("[Round \"?\"]\n"))
-		sb.WriteString(fmt.Sprintf("[White \"?\"]\n"))
-		sb.WriteString(fmt.Sprintf("[Black \"?\"]\n"))
-		sb.WriteString(fmt.Sprintf("[Result \"*\"]\n")) // TODO
-		sb.WriteString(fmt.Sprintf("[Event \"?\"]\n"))
-	}
+	sb.WriteString(fmt.Sprintf("[Event \"%s\"]\n", pgn.Tags["Event"]))
+	sb.WriteString(fmt.Sprintf("[Site \"%s\"]\n", pgn.Tags["Site"]))
+	sb.WriteString(fmt.Sprintf("[Date \"%s\"]\n", pgn.Tags["Date"]))
+	sb.WriteString(fmt.Sprintf("[Round \"%s\"]\n", pgn.Tags["Round"]))
+	sb.WriteString(fmt.Sprintf("[White \"%s\"]\n", pgn.White))
+	sb.WriteString(fmt.Sprintf("[Black \"%s\"]\n", pgn.Black))
+	sb.WriteString(fmt.Sprintf("[WhiteElo \"%d\"]\n", pgn.WhiteElo))
+	sb.WriteString(fmt.Sprintf("[BlackElo \"%d\"]\n", pgn.BlackElo))
+	sb.WriteString(fmt.Sprintf("[Result \"%s\"]\n", pgn.Result))
 
-	if startFEN != "" && startFEN != startPosFEN {
-		sb.WriteString(fmt.Sprintf("[FEN \"%s\"]\n", startFEN))
+	if pgn.SetupFEN != "" && pgn.SetupFEN != startPosFEN {
+		sb.WriteString(fmt.Sprintf("[FEN \"%s\"]\n", pgn.SetupFEN))
 		sb.WriteString("[Setup \"1\"]\n")
 	}
 
 	sb.WriteString(fmt.Sprintf("[Annotator \"Stockfish 15\"]\n"))
-	if engineDepth != 0 {
-		sb.WriteString(fmt.Sprintf("[Depth \"%d\"]\n", engineDepth))
-	}
 	sb.WriteString("\n")
 
-	board := fen.FENtoBoard(startFEN)
+	board := fen.FENtoBoard(pgn.SetupFEN)
 	prevEval := "0.24"
-	finalResult := "*"
 	for _, move := range movesEval {
-		moveNumber := (move.Ply / 2) + 1
-		color := plyToColor(move.Ply)
+		moveNumber := board.FullMove
+		color := board.ActiveColor
 
 		var englishColor string
 		if color == fen.WhitePieces {
@@ -75,7 +70,7 @@ func evalToPGN(startFEN string, engineDepth int, movesEval Moves, header bool) s
 				annotationWord = "Inaccuracy"
 			}
 
-			showVariations = diff <= -0.05
+			showVariations = diff <= -0.02
 		}
 
 		sb.WriteString(move.SAN + annotation + "\n")
@@ -98,24 +93,19 @@ func evalToPGN(startFEN string, engineDepth int, movesEval Moves, header bool) s
 
 		if move.Eval.Mated {
 			sb.WriteString(fmt.Sprintf("    { Checkmate. %s is victorious. }\n", englishColor))
-			if color == fen.WhitePieces {
-				finalResult = "1-0"
-			} else {
-				finalResult = "0-1"
-			}
 		} else {
 			sb.WriteString(fmt.Sprintf("    { [%%eval %s] }\n", move.Eval.String(color)))
 		}
 
 		if showVariations {
 			writeVariation(&sb, board, bestMove, "")
-			writeVariation(&sb, board, playedMove, annotation)
+			//writeVariation(&sb, board, playedMove, annotation)
 		}
 		board.Moves(move.UCI)
 
 		prevEval = move.Eval.String(color)
 	}
-	sb.WriteString(fmt.Sprintf("%s\n", finalResult)) // TODO: lazy, make this 1-0, 0-1, 1/2-1/2, or *
+	sb.WriteString(fmt.Sprintf("%s\n", pgn.Result))
 
 	return sb.String()
 }
