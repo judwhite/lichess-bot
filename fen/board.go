@@ -581,6 +581,7 @@ func (b *Board) LoadFEN(fen string) {
 		fen = startPosFEN
 	}
 
+	fen = strings.TrimSpace(fen)
 	parts := strings.Split(fen, " ")
 	ranks := strings.Split(parts[0], "/")
 
