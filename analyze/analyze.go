@@ -331,14 +331,16 @@ func (a *Analyzer) analyzePosition(ctx context.Context, opts AnalysisOptions, fe
 		return nil, fmt.Errorf("TODO: position '%s' is already game over", fenPos)
 	}
 
-	moveCount := max(len(moves), opts.MultiPV)
+	var moveCount int
 	if len(moves) != 0 {
 		if len(moves) == 1 {
 			panic(fmt.Errorf("len(moves) = %d; most likely not intended. moves: %v", len(moves), moves))
 		}
+		moveCount = len(moves)
 		a.input <- fmt.Sprintf("setoption name MultiPV value %d", len(moves))
 		a.input <- fmt.Sprintf("go depth %d nodes %d movetime %d searchmoves %s", opts.MaxDepth, maxNodes, opts.MaxTime.Milliseconds(), strings.Join(moves, " "))
 	} else {
+		moveCount = opts.MultiPV
 		a.input <- fmt.Sprintf("setoption name MultiPV value %d", opts.MultiPV)
 		a.input <- fmt.Sprintf("go depth %d nodes %d movetime %d", opts.MaxDepth, maxNodes, opts.MaxTime.Milliseconds())
 	}
