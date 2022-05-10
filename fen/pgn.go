@@ -26,6 +26,19 @@ const (
 	Draw        = 3
 )
 
+func (gr GameResult) String() string {
+	switch gr {
+	case WhiteWon:
+		return "1-0"
+	case BlackWon:
+		return "0-1"
+	case Draw:
+		return "1/2-1/2"
+	default:
+		return "*"
+	}
+}
+
 type PGNGame struct {
 	SetupFEN string
 	White    string
