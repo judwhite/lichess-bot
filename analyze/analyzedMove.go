@@ -21,5 +21,4 @@ type Move struct {
 	Eval     Eval   `json:"eval"`
 	BestMove Eval   `json:"best_move"`
 	IsMate   bool   `json:"mate,omitempty"`
-	PV       string `json:"pv,omitempty"`
 }
