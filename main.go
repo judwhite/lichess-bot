@@ -28,7 +28,7 @@ var defaultAnalysisOptions = analyze.AnalysisOptions{
 	MinDepth:   45,
 	MaxDepth:   80,
 	MinTime:    60 * time.Second,
-	MaxTime:    60 * time.Minute,
+	MaxTime:    90 * time.Minute,
 	DepthDelta: 3,
 	MultiPV:    5,
 	MinNodes:   3_600_000_000,
@@ -40,7 +40,7 @@ func main() {
 	var (
 		botFlag              bool
 		updateBookFilename   string
-		updateBookFEN        string
+		startingFEN          string
 		dedupeEPDFilename    string
 		freqPGNFilename      string
 		freqMergeEPDFilename string
@@ -58,27 +58,42 @@ func main() {
 		bustedPGNFile        string
 		bustedPlayer         string
 		bustedColor          string
+		searchMoves          string
 	)
 
 	var flags flag.FlagSet
+
+	// bot
 	flags.BoolVar(&botFlag, "bot", false, "runs the bot")
 	flags.StringVar(&tc, "tc", "1+1", "time control minutes+secs")
+	flags.StringVar(&onlyUser, "only-user", "", "only accept challenges from this user")
+	flags.StringVar(&challenge, "challenge", "", "challenge lichess user")
+
+	// update yaml book
 	flags.StringVar(&updateBookFilename, "update-book", "", "run analysis and update a book")
-	flags.StringVar(&updateBookFEN, "fen", "", "run analysis and update a book on a specific FEN")
-	flags.StringVar(&dedupeEPDFilename, "dedupe-epd", "", "show duplicates in EPD file")
+	flags.StringVar(&startingFEN, "fen", "", "run analysis and update a book on a specific FEN. when used with -bot instead of -update-book creates a challenge with this starting FEN")
+	flags.StringVar(&searchMoves, "search-moves", "", "run analysis only on these moves. use SAN and separate with commas")
+
+	// frequency counts
 	flags.StringVar(&freqPGNFilename, "freq-pgn", "", "show most common positions from a PGN file in EPD format (see also freq-count)")
 	flags.StringVar(&freqMergeEPDFilename, "freq-merge-epd", "", "merge positions with an EPD file. only new positions are added.")
 	flags.IntVar(&freqCount, "freq-count", 3, "minimum times a position must occur (see freq-pgn)")
 	flags.IntVar(&freqMaxPly, "freq-max-ply", 0, "max ply to analyze, 0 = all (see freq-pgn)")
+
+	// download lichess user's games
 	flags.StringVar(&lichessUser, "lichess-user", "", "get all rated games for a lichess user")
-	flags.StringVar(&onlyUser, "only-user", "", "only accept challenges from this user")
-	flags.StringVar(&challenge, "challenge", "", "challenge lichess user")
+
+	// analyze a PGN file
 	flags.StringVar(&analyzePGN, "analyze-pgn", "", "analyze pgn file")
 	flags.StringVar(&analyzeUseBook, "analyze-use-book", "", "use saved position eval in YAML book")
+
+	// EPD stuff
+	flags.StringVar(&dedupeEPDFilename, "dedupe-epd", "", "show duplicates in EPD file")
 	flags.StringVar(&extractEPD, "extract-epd", "", "pgn file name")
 	flags.IntVar(&extractEPDPlies, "extract-epd-plies", 0, "number of plies to extract")
 	flags.StringVar(&epdToYAMLBook, "epd-to-yamlbook", "", "EPD file name to convert (new file will be <file>.yamlbook)")
 
+	// busted lines from pgn database; work in progress
 	flags.StringVar(&bustedPGNFile, "busted-pgn", "", "find busted lines in a PGN file")
 	flags.StringVar(&bustedPlayer, "busted-player", "", "player name")
 	flags.StringVar(&bustedColor, "busted-color", "", "white or black")
@@ -101,17 +116,17 @@ func main() {
 			log.Fatal(err)
 		}
 
-		runLichessBot(onlyUser, challenge, timeControl, updateBookFEN)
+		runLichessBot(onlyUser, challenge, timeControl, startingFEN)
 		return
 	}
 
 	if updateBookFilename != "" {
 		var fens []string
-		if updateBookFEN != "" {
-			if strings.Contains(updateBookFEN, "/") && strings.Contains(updateBookFEN, " ") {
-				fens = append(fens, updateBookFEN)
+		if startingFEN != "" {
+			if strings.Contains(startingFEN, "/") && strings.Contains(startingFEN, " ") {
+				fens = append(fens, startingFEN)
 			} else {
-				b, err := ioutil.ReadFile(updateBookFEN)
+				b, err := ioutil.ReadFile(startingFEN)
 				if err != nil {
 					log.Fatal(err)
 				}
@@ -124,7 +139,7 @@ func main() {
 				}
 			}
 		}
-		if err := UpdateFile(context.Background(), updateBookFilename, defaultAnalysisOptions, fens); err != nil {
+		if err := UpdateFile(context.Background(), updateBookFilename, defaultAnalysisOptions, fens, searchMoves); err != nil {
 			log.Fatal(err)
 		}
 		return
@@ -248,10 +263,6 @@ func main() {
 	os.Exit(1)
 }
 
-func PGNStats(filename string) error {
-	return nil
-}
-
 func GetMostFrequentPGNPositions(filename string, minCount int, epdFilename string) error {
 	db, err := fen.LoadPGNDatabase(filename)
 	if err != nil {
@@ -311,7 +322,7 @@ func GetMostFrequentPGNPositions(filename string, minCount int, epdFilename stri
 }
 
 func positionLookup() {
-	results, err := api.Lookup("", "e2e4,c7c5,d2d4,c5d4,c2c3,d4c3,b1c3")
+	results, err := api.Lookup(api.Masters, "", "e2e4", "c7c5", "d2d4", "c5d4", "c2c3", "d4c3", "b1c3")
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -341,6 +352,7 @@ func runLichessBot(onlyUser, challenge string, tc TimeControl, fenPos string) {
 }
 
 func startTrollFish(ctx context.Context, input <-chan string, output chan<- string) error {
+	// TODO: put in config
 	binary := "/home/jud/projects/trollfish/trollfish"
 	dir := "/home/jud/projects/trollfish"
 
@@ -438,9 +450,52 @@ func ts() string {
 	return fmt.Sprintf("[%s]", time.Now().Format("2006-01-02 15:04:05.000"))
 }
 
-func UpdateFile(ctx context.Context, filename string, opts analyze.AnalysisOptions, fens []string) error {
+func UpdateFile(ctx context.Context, filename string, opts analyze.AnalysisOptions, fens []string, searchMoves string) error {
+	if len(fens) != 1 && searchMoves != "" {
+		return fmt.Errorf("-search-moves can only be used with -fen")
+	}
+
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+
+	var searchMovesUCI []string
+	if searchMoves != "" {
+		b := fen.FENtoBoard(fens[0])
+
+		var searchMovesSAN []string
+		if searchMoves == "all" {
+			allMoves := b.AllLegalMoves()
+			for _, move := range allMoves {
+				searchMovesSAN = append(searchMovesSAN, b.UCItoSAN(move.UCI))
+			}
+		} else {
+			searchMovesSAN = strings.Split(searchMoves, ",")
+		}
+
+		seen := make(map[string]struct{})
+		for i := 0; i < len(searchMovesSAN); i++ {
+			moveSAN := searchMovesSAN[i]
+
+			_, found := seen[moveSAN]
+			if found {
+				fmt.Printf("duplicate '%s' removed\n", moveSAN)
+				searchMovesSAN = append(searchMovesSAN[:i], searchMovesSAN[i+1:]...)
+				i--
+				continue
+			}
+			seen[moveSAN] = struct{}{}
+
+			moveUCI, err := b.SANtoUCI(moveSAN)
+			if err != nil {
+				return err
+			}
+			searchMovesUCI = append(searchMovesUCI, moveUCI)
+		}
+
+		fmt.Printf("FEN: %v\n", b.FEN())
+		fmt.Printf("SAN searchmoves: %v len: %d\n", searchMovesSAN, len(searchMovesSAN))
+		fmt.Printf("UCI searchmoves: %v len: %d\n", searchMovesUCI, len(searchMovesUCI))
+	}
 
 	file, err := yamlbook.Load(filename)
 	if err != nil {
@@ -480,7 +535,7 @@ func UpdateFile(ctx context.Context, filename string, opts analyze.AnalysisOptio
 		fmt.Printf("%s FEN: %s  piece_count: %d\n%s\n", ts(), boardFEN, fen.FENtoBoard(boardFEN).PieceCount(), ts())
 
 		fenKey := fen.Key(boardFEN)
-		evals, err := a.AnalyzePosition(ctx, opts, fenKey)
+		evals, err := a.AnalyzePosition(ctx, opts, fenKey, searchMovesUCI...)
 		if err != nil {
 			return err
 		}
