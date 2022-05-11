@@ -50,7 +50,7 @@ func (m Moves) HaveDifferentTimestamps() bool {
 
 	ts := m[0].TS
 	for i := 1; i < len(m); i++ {
-		if m[i].TS != ts {
+		if abs(m[i].TS-ts) > 10 {
 			return true
 		}
 	}
@@ -110,4 +110,11 @@ func (m Moves) UCIs() []string {
 		ucis = append(ucis, move.UCI())
 	}
 	return ucis
+}
+
+func abs(a int64) int64 {
+	if a > 0 {
+		return a
+	}
+	return -a
 }
