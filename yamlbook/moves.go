@@ -7,7 +7,10 @@ func (m Moves) Less(i, j int) bool {
 		return m[i].Weight > m[j].Weight
 	}
 
-	if m[i].Mate != m[j].Mate {
+	if m[i].Mate != 0 && m[j].Mate != 0 {
+		return m[i].Mate < m[j].Mate
+	}
+	if m[i].Mate != 0 || m[j].Mate != 0 {
 		return m[i].Mate > m[j].Mate
 	}
 
@@ -92,7 +95,7 @@ func (m Moves) GetBestMoveByEval(preferUCI string) *Move {
 			continue
 		}
 
-		if move.CP > bestMove.CP {
+		if move.Mate == 0 && bestMove.Mate == 0 && move.CP > bestMove.CP {
 			bestMove = move
 			continue
 		}
